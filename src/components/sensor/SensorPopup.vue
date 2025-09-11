@@ -468,19 +468,23 @@ const updatert = () => {
 }
 
 const closesensor = () => {
-  router.replace({
-    name: route.name,
-    query: {
-      provider: route.query.provider,
-      type: route.query.type,
-      zoom: route.query.zoom,
-      lat: route.query.lat,
-      lng: route.query.lng,
-    },
-  });
-  emit("close");
-
-  state.showAnalysisChart = false
+  try {
+    router.replace({
+      name: route.name,
+      query: {
+        provider: route.query.provider,
+        type: route.query.type,
+        zoom: route.query.zoom,
+        lat: route.query.lat,
+        lng: route.query.lng,
+        // Убираем sensor из URL чтобы предотвратить автоматическое открытие
+      },
+    });
+    emit("close");
+    state.showAnalysisChart = false;
+  } catch (error) {
+    console.error('Error closing sensor:', error);
+  }
 };
 
 function addressQuality(addr) {

@@ -479,14 +479,22 @@ const handlerClick = async (point) => {
   state.isLoad = true;
   state.point = [];
   
-  // Use existing logs from mapStore.sensors - no API calls needed
+  // Get logs from API
   let log = [];
-  const sensorData = mapStore.sensors.find(s => s.sensor_id === point.sensor_id);
-  if (sensorData && sensorData.logs) {
-    log = sensorData.logs;
+  try {
+    if (state.status === "history") {
+      log = await state.providerObj.getHistoryPeriodBySensor(
+        point.sensor_id,
+        state.providerObj.start,
+        state.providerObj.end
+      );
+      mapStore.mapinactive = true;
+    } else {
+      log = await state.providerObj.getHistoryBySensor(point.sensor_id);
+    }
+  } catch (error) {
+    console.error('Error fetching sensor history:', error);
   }
-  
-  mapStore.mapinactive = true;
   
   document.querySelectorAll('.with-active-sensor').forEach(el => {
     el.classList.remove('with-active-sensor');
@@ -500,10 +508,16 @@ const handlerClick = async (point) => {
 
 const handlerHistoryLog = async ({ sensor_id, start, end }) => {
   if (state.status === "history") {
-    // Use existing logs from mapStore.sensors - no API calls needed
-    const sensorData = mapStore.sensors.find(s => s.sensor_id === sensor_id);
-    if (sensorData && sensorData.logs) {
-      state.point = { ...state.point, log: [...sensorData.logs] };
+    // Get fresh logs from API for the new date range
+    let log = [];
+    try {
+      log = await state.providerObj.getHistoryPeriodBySensor(sensor_id, start, end);
+    } catch (error) {
+      // Silently handle error - log will remain empty
+    }
+    
+    if (state.point && state.point.sensor_id === sensor_id) {
+      state.point = { ...state.point, log: [...log] };
     }
   }
 };
@@ -529,9 +543,9 @@ const getScope = async (type) => {
 const handlerClose = () => {
   mapStore.mapinactive = false;
 
-  if (state.point) {
+  if (state.point && state.point.sensor_id) {
     markers.hidePath(state.point.sensor_id);
-    handleActivePoint(state.point.sensor_id)
+    // Don't call handleActivePoint when closing - just hide the path
   }
   state.point = null;
   instanceMap().setActiveArea({
@@ -542,11 +556,7 @@ const handlerClose = () => {
     height: "100%",
   });
   unsubscribeRealtime();
-  // Repaint markers to match the latest selected unit (from store) once popup is closed
-  const u = (mapStore.currentUnit || props.type || '').toLowerCase();
-  if (u) {
-    handleTypeChange(u);
-  }
+  // Don't repaint markers when closing - they should stay as they are
 };
 
 const handleTypeChange = async (newType) => {
