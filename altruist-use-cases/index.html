@@ -1,0 +1,594 @@
+<!DOCTYPE html><html lang="en" amp="" dir="ltr"><head>
+    <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
+    <meta http-equiv="Pragma" content="no-cache">
+    <meta http-equiv="Expires" content="0">
+
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1">
+    <style type="text/css">:root, :host {
+  --fa-font-solid: normal 900 1em/1 "Font Awesome 6 Free";
+  --fa-font-regular: normal 400 1em/1 "Font Awesome 6 Free";
+  --fa-font-light: normal 300 1em/1 "Font Awesome 6 Pro";
+  --fa-font-thin: normal 100 1em/1 "Font Awesome 6 Pro";
+  --fa-font-duotone: normal 900 1em/1 "Font Awesome 6 Duotone";
+  --fa-font-duotone-regular: normal 400 1em/1 "Font Awesome 6 Duotone";
+  --fa-font-duotone-light: normal 300 1em/1 "Font Awesome 6 Duotone";
+  --fa-font-duotone-thin: normal 100 1em/1 "Font Awesome 6 Duotone";
+  --fa-font-brands: normal 400 1em/1 "Font Awesome 6 Brands";
+  --fa-font-sharp-solid: normal 900 1em/1 "Font Awesome 6 Sharp";
+  --fa-font-sharp-regular: normal 400 1em/1 "Font Awesome 6 Sharp";
+  --fa-font-sharp-light: normal 300 1em/1 "Font Awesome 6 Sharp";
+  --fa-font-sharp-thin: normal 100 1em/1 "Font Awesome 6 Sharp";
+  --fa-font-sharp-duotone-solid: normal 900 1em/1 "Font Awesome 6 Sharp Duotone";
+  --fa-font-sharp-duotone-regular: normal 400 1em/1 "Font Awesome 6 Sharp Duotone";
+  --fa-font-sharp-duotone-light: normal 300 1em/1 "Font Awesome 6 Sharp Duotone";
+  --fa-font-sharp-duotone-thin: normal 100 1em/1 "Font Awesome 6 Sharp Duotone";
+}
+
+svg:not(:root).svg-inline--fa, svg:not(:host).svg-inline--fa {
+  overflow: visible;
+  box-sizing: content-box;
+}
+
+.svg-inline--fa {
+  display: var(--fa-display, inline-block);
+  height: 1em;
+  overflow: visible;
+  vertical-align: -0.125em;
+}
+.svg-inline--fa.fa-2xs {
+  vertical-align: 0.1em;
+}
+.svg-inline--fa.fa-xs {
+  vertical-align: 0em;
+}
+.svg-inline--fa.fa-sm {
+  vertical-align: -0.0714285705em;
+}
+.svg-inline--fa.fa-lg {
+  vertical-align: -0.2em;
+}
+.svg-inline--fa.fa-xl {
+  vertical-align: -0.25em;
+}
+.svg-inline--fa.fa-2xl {
+  vertical-align: -0.3125em;
+}
+.svg-inline--fa.fa-pull-left {
+  margin-right: var(--fa-pull-margin, 0.3em);
+  width: auto;
+}
+.svg-inline--fa.fa-pull-right {
+  margin-left: var(--fa-pull-margin, 0.3em);
+  width: auto;
+}
+.svg-inline--fa.fa-li {
+  width: var(--fa-li-width, 2em);
+  top: 0.25em;
+}
+.svg-inline--fa.fa-fw {
+  width: var(--fa-fw-width, 1.25em);
+}
+
+.fa-layers svg.svg-inline--fa {
+  bottom: 0;
+  left: 0;
+  margin: auto;
+  position: absolute;
+  right: 0;
+  top: 0;
+}
+
+.fa-layers-counter, .fa-layers-text {
+  display: inline-block;
+  position: absolute;
+  text-align: center;
+}
+
+.fa-layers {
+  display: inline-block;
+  height: 1em;
+  position: relative;
+  text-align: center;
+  vertical-align: -0.125em;
+  width: 1em;
+}
+.fa-layers svg.svg-inline--fa {
+  transform-origin: center center;
+}
+
+.fa-layers-text {
+  left: 50%;
+  top: 50%;
+  transform: translate(-50%, -50%);
+  transform-origin: center center;
+}
+
+.fa-layers-counter {
+  background-color: var(--fa-counter-background-color, #ff253a);
+  border-radius: var(--fa-counter-border-radius, 1em);
+  box-sizing: border-box;
+  color: var(--fa-inverse, #fff);
+  line-height: var(--fa-counter-line-height, 1);
+  max-width: var(--fa-counter-max-width, 5em);
+  min-width: var(--fa-counter-min-width, 1.5em);
+  overflow: hidden;
+  padding: var(--fa-counter-padding, 0.25em 0.5em);
+  right: var(--fa-right, 0);
+  text-overflow: ellipsis;
+  top: var(--fa-top, 0);
+  transform: scale(var(--fa-counter-scale, 0.25));
+  transform-origin: top right;
+}
+
+.fa-layers-bottom-right {
+  bottom: var(--fa-bottom, 0);
+  right: var(--fa-right, 0);
+  top: auto;
+  transform: scale(var(--fa-layers-scale, 0.25));
+  transform-origin: bottom right;
+}
+
+.fa-layers-bottom-left {
+  bottom: var(--fa-bottom, 0);
+  left: var(--fa-left, 0);
+  right: auto;
+  top: auto;
+  transform: scale(var(--fa-layers-scale, 0.25));
+  transform-origin: bottom left;
+}
+
+.fa-layers-top-right {
+  top: var(--fa-top, 0);
+  right: var(--fa-right, 0);
+  transform: scale(var(--fa-layers-scale, 0.25));
+  transform-origin: top right;
+}
+
+.fa-layers-top-left {
+  left: var(--fa-left, 0);
+  right: auto;
+  top: var(--fa-top, 0);
+  transform: scale(var(--fa-layers-scale, 0.25));
+  transform-origin: top left;
+}
+
+.fa-1x {
+  font-size: 1em;
+}
+
+.fa-2x {
+  font-size: 2em;
+}
+
+.fa-3x {
+  font-size: 3em;
+}
+
+.fa-4x {
+  font-size: 4em;
+}
+
+.fa-5x {
+  font-size: 5em;
+}
+
+.fa-6x {
+  font-size: 6em;
+}
+
+.fa-7x {
+  font-size: 7em;
+}
+
+.fa-8x {
+  font-size: 8em;
+}
+
+.fa-9x {
+  font-size: 9em;
+}
+
+.fa-10x {
+  font-size: 10em;
+}
+
+.fa-2xs {
+  font-size: 0.625em;
+  line-height: 0.1em;
+  vertical-align: 0.225em;
+}
+
+.fa-xs {
+  font-size: 0.75em;
+  line-height: 0.0833333337em;
+  vertical-align: 0.125em;
+}
+
+.fa-sm {
+  font-size: 0.875em;
+  line-height: 0.0714285718em;
+  vertical-align: 0.0535714295em;
+}
+
+.fa-lg {
+  font-size: 1.25em;
+  line-height: 0.05em;
+  vertical-align: -0.075em;
+}
+
+.fa-xl {
+  font-size: 1.5em;
+  line-height: 0.0416666682em;
+  vertical-align: -0.125em;
+}
+
+.fa-2xl {
+  font-size: 2em;
+  line-height: 0.03125em;
+  vertical-align: -0.1875em;
+}
+
+.fa-fw {
+  text-align: center;
+  width: 1.25em;
+}
+
+.fa-ul {
+  list-style-type: none;
+  margin-left: var(--fa-li-margin, 2.5em);
+  padding-left: 0;
+}
+.fa-ul > li {
+  position: relative;
+}
+
+.fa-li {
+  left: calc(-1 * var(--fa-li-width, 2em));
+  position: absolute;
+  text-align: center;
+  width: var(--fa-li-width, 2em);
+  line-height: inherit;
+}
+
+.fa-border {
+  border-color: var(--fa-border-color, #eee);
+  border-radius: var(--fa-border-radius, 0.1em);
+  border-style: var(--fa-border-style, solid);
+  border-width: var(--fa-border-width, 0.08em);
+  padding: var(--fa-border-padding, 0.2em 0.25em 0.15em);
+}
+
+.fa-pull-left {
+  float: left;
+  margin-right: var(--fa-pull-margin, 0.3em);
+}
+
+.fa-pull-right {
+  float: right;
+  margin-left: var(--fa-pull-margin, 0.3em);
+}
+
+.fa-beat {
+  animation-name: fa-beat;
+  animation-delay: var(--fa-animation-delay, 0s);
+  animation-direction: var(--fa-animation-direction, normal);
+  animation-duration: var(--fa-animation-duration, 1s);
+  animation-iteration-count: var(--fa-animation-iteration-count, infinite);
+  animation-timing-function: var(--fa-animation-timing, ease-in-out);
+}
+
+.fa-bounce {
+  animation-name: fa-bounce;
+  animation-delay: var(--fa-animation-delay, 0s);
+  animation-direction: var(--fa-animation-direction, normal);
+  animation-duration: var(--fa-animation-duration, 1s);
+  animation-iteration-count: var(--fa-animation-iteration-count, infinite);
+  animation-timing-function: var(--fa-animation-timing, cubic-bezier(0.28, 0.84, 0.42, 1));
+}
+
+.fa-fade {
+  animation-name: fa-fade;
+  animation-delay: var(--fa-animation-delay, 0s);
+  animation-direction: var(--fa-animation-direction, normal);
+  animation-duration: var(--fa-animation-duration, 1s);
+  animation-iteration-count: var(--fa-animation-iteration-count, infinite);
+  animation-timing-function: var(--fa-animation-timing, cubic-bezier(0.4, 0, 0.6, 1));
+}
+
+.fa-beat-fade {
+  animation-name: fa-beat-fade;
+  animation-delay: var(--fa-animation-delay, 0s);
+  animation-direction: var(--fa-animation-direction, normal);
+  animation-duration: var(--fa-animation-duration, 1s);
+  animation-iteration-count: var(--fa-animation-iteration-count, infinite);
+  animation-timing-function: var(--fa-animation-timing, cubic-bezier(0.4, 0, 0.6, 1));
+}
+
+.fa-flip {
+  animation-name: fa-flip;
+  animation-delay: var(--fa-animation-delay, 0s);
+  animation-direction: var(--fa-animation-direction, normal);
+  animation-duration: var(--fa-animation-duration, 1s);
+  animation-iteration-count: var(--fa-animation-iteration-count, infinite);
+  animation-timing-function: var(--fa-animation-timing, ease-in-out);
+}
+
+.fa-shake {
+  animation-name: fa-shake;
+  animation-delay: var(--fa-animation-delay, 0s);
+  animation-direction: var(--fa-animation-direction, normal);
+  animation-duration: var(--fa-animation-duration, 1s);
+  animation-iteration-count: var(--fa-animation-iteration-count, infinite);
+  animation-timing-function: var(--fa-animation-timing, linear);
+}
+
+.fa-spin {
+  animation-name: fa-spin;
+  animation-delay: var(--fa-animation-delay, 0s);
+  animation-direction: var(--fa-animation-direction, normal);
+  animation-duration: var(--fa-animation-duration, 2s);
+  animation-iteration-count: var(--fa-animation-iteration-count, infinite);
+  animation-timing-function: var(--fa-animation-timing, linear);
+}
+
+.fa-spin-reverse {
+  --fa-animation-direction: reverse;
+}
+
+.fa-pulse,
+.fa-spin-pulse {
+  animation-name: fa-spin;
+  animation-direction: var(--fa-animation-direction, normal);
+  animation-duration: var(--fa-animation-duration, 1s);
+  animation-iteration-count: var(--fa-animation-iteration-count, infinite);
+  animation-timing-function: var(--fa-animation-timing, steps(8));
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .fa-beat,
+.fa-bounce,
+.fa-fade,
+.fa-beat-fade,
+.fa-flip,
+.fa-pulse,
+.fa-shake,
+.fa-spin,
+.fa-spin-pulse {
+    animation-delay: -1ms;
+    animation-duration: 1ms;
+    animation-iteration-count: 1;
+    transition-delay: 0s;
+    transition-duration: 0s;
+  }
+}
+@keyframes fa-beat {
+  0%, 90% {
+    transform: scale(1);
+  }
+  45% {
+    transform: scale(var(--fa-beat-scale, 1.25));
+  }
+}
+@keyframes fa-bounce {
+  0% {
+    transform: scale(1, 1) translateY(0);
+  }
+  10% {
+    transform: scale(var(--fa-bounce-start-scale-x, 1.1), var(--fa-bounce-start-scale-y, 0.9)) translateY(0);
+  }
+  30% {
+    transform: scale(var(--fa-bounce-jump-scale-x, 0.9), var(--fa-bounce-jump-scale-y, 1.1)) translateY(var(--fa-bounce-height, -0.5em));
+  }
+  50% {
+    transform: scale(var(--fa-bounce-land-scale-x, 1.05), var(--fa-bounce-land-scale-y, 0.95)) translateY(0);
+  }
+  57% {
+    transform: scale(1, 1) translateY(var(--fa-bounce-rebound, -0.125em));
+  }
+  64% {
+    transform: scale(1, 1) translateY(0);
+  }
+  100% {
+    transform: scale(1, 1) translateY(0);
+  }
+}
+@keyframes fa-fade {
+  50% {
+    opacity: var(--fa-fade-opacity, 0.4);
+  }
+}
+@keyframes fa-beat-fade {
+  0%, 100% {
+    opacity: var(--fa-beat-fade-opacity, 0.4);
+    transform: scale(1);
+  }
+  50% {
+    opacity: 1;
+    transform: scale(var(--fa-beat-fade-scale, 1.125));
+  }
+}
+@keyframes fa-flip {
+  50% {
+    transform: rotate3d(var(--fa-flip-x, 0), var(--fa-flip-y, 1), var(--fa-flip-z, 0), var(--fa-flip-angle, -180deg));
+  }
+}
+@keyframes fa-shake {
+  0% {
+    transform: rotate(-15deg);
+  }
+  4% {
+    transform: rotate(15deg);
+  }
+  8%, 24% {
+    transform: rotate(-18deg);
+  }
+  12%, 28% {
+    transform: rotate(18deg);
+  }
+  16% {
+    transform: rotate(-22deg);
+  }
+  20% {
+    transform: rotate(22deg);
+  }
+  32% {
+    transform: rotate(-12deg);
+  }
+  36% {
+    transform: rotate(12deg);
+  }
+  40%, 100% {
+    transform: rotate(0deg);
+  }
+}
+@keyframes fa-spin {
+  0% {
+    transform: rotate(0deg);
+  }
+  100% {
+    transform: rotate(360deg);
+  }
+}
+.fa-rotate-90 {
+  transform: rotate(90deg);
+}
+
+.fa-rotate-180 {
+  transform: rotate(180deg);
+}
+
+.fa-rotate-270 {
+  transform: rotate(270deg);
+}
+
+.fa-flip-horizontal {
+  transform: scale(-1, 1);
+}
+
+.fa-flip-vertical {
+  transform: scale(1, -1);
+}
+
+.fa-flip-both,
+.fa-flip-horizontal.fa-flip-vertical {
+  transform: scale(-1, -1);
+}
+
+.fa-rotate-by {
+  transform: rotate(var(--fa-rotate-angle, 0));
+}
+
+.fa-stack {
+  display: inline-block;
+  vertical-align: middle;
+  height: 2em;
+  position: relative;
+  width: 2.5em;
+}
+
+.fa-stack-1x,
+.fa-stack-2x {
+  bottom: 0;
+  left: 0;
+  margin: auto;
+  position: absolute;
+  right: 0;
+  top: 0;
+  z-index: var(--fa-stack-z-index, auto);
+}
+
+.svg-inline--fa.fa-stack-1x {
+  height: 1em;
+  width: 1.25em;
+}
+.svg-inline--fa.fa-stack-2x {
+  height: 2em;
+  width: 2.5em;
+}
+
+.fa-inverse {
+  color: var(--fa-inverse, #fff);
+}
+
+.sr-only,
+.fa-sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border-width: 0;
+}
+
+.sr-only-focusable:not(:focus),
+.fa-sr-only-focusable:not(:focus) {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border-width: 0;
+}
+
+.svg-inline--fa .fa-primary {
+  fill: var(--fa-primary-color, currentColor);
+  opacity: var(--fa-primary-opacity, 1);
+}
+
+.svg-inline--fa .fa-secondary {
+  fill: var(--fa-secondary-color, currentColor);
+  opacity: var(--fa-secondary-opacity, 0.4);
+}
+
+.svg-inline--fa.fa-swap-opacity .fa-primary {
+  opacity: var(--fa-secondary-opacity, 0.4);
+}
+
+.svg-inline--fa.fa-swap-opacity .fa-secondary {
+  opacity: var(--fa-primary-opacity, 1);
+}
+
+.svg-inline--fa mask .fa-primary,
+.svg-inline--fa mask .fa-secondary {
+  fill: black;
+}</style><link rel="icon" href="/favicon.ico">
+    <meta name="description" content="Monitoring the environment involves plenty of pitfalls, making the job far harder than it looks at first glance. Our team—the creators of Altruist and the open-source project sensors.social—has spent seven years studying and working in this field, and we hope our experience will pleasantly surprise you and give you a practical tool for adapting to the conditions in which you and your loved ones live. Below we explain which main user groups Altruist is designed for…">
+    <link rel="apple-touch-icon" href="/app-icon-120.png" sizes="120x120">
+    <link rel="mask-icon" href="/app-icon-512.png" color="#FFFFFF">
+    <meta name="theme-color" content="#ffffff">
+    <title>Who Altruist Was Created For - Sensors use cases</title>
+
+    <script>
+      // Only load Matomo if user hasn't opted out
+      if (!localStorage.getItem("matomoOptOut")) {
+        // Initialize _paq BEFORE loading matomo.js
+        window._paq = window._paq || [];
+        window._paq.push(["setTrackerUrl", "https://matomo.robonomics.network/matomo.php"]);
+        window._paq.push(["setSiteId", "5"]);
+        window._paq.push(["enableLinkTracking"]);
+
+        // Inject Matomo script
+        const g = document.createElement("script");
+        g.async = true;
+        g.defer = true;
+        g.src = "https://matomo.robonomics.network/matomo.js";
+        g.onload = () => console.log("Matomo loaded successfully", window._paq);
+        document.head.appendChild(g);
+      }
+    </script><script async="" defer="" src="https://matomo.robonomics.network/matomo.js"></script>
+    <script type="module" crossorigin="" src="/assets/index.d11665e2.js"></script>
+    <link rel="stylesheet" href="/assets/index.46ccfdab.css">
+  <style>.vue-notification-group{display:block;position:fixed;z-index:5000}.vue-notification-wrapper{display:block;overflow:hidden;width:100%;margin:0;padding:0}.notification-title{font-weight:600}.vue-notification-template{display:block;box-sizing:border-box;background:white;text-align:left}.vue-notification{display:block;box-sizing:border-box;text-align:left;font-size:12px;padding:10px;margin:0 5px 5px;color:#fff;background:#44A4FC;border-left:5px solid #187FE7}.vue-notification.warn{background:#ffb648;border-left-color:#f48a06}.vue-notification.error{background:#E54D42;border-left-color:#b82e24}.vue-notification.success{background:#68CD86;border-left-color:#42a85f}.vn-fade-enter-active,.vn-fade-leave-active,.vn-fade-move{transition:all .5s}.vn-fade-enter-from,.vn-fade-leave-to{opacity:0}</style><meta property="og:type" content="website"><meta property="og:site_name" content="Sensors.social"><meta property="og:title" content="Who Altruist Was Created For - Sensors use cases"><meta property="og:description" content="Monitoring the environment involves plenty of pitfalls, making the job far harder than it looks at first glance. Our team—the creators of Altruist and the open-source project sensors.social—has spent seven years studying and working in this field, and we hope our experience will pleasantly surprise you and give you a practical tool for adapting to the conditions in which you and your loved ones live. Below we explain which main user groups Altruist is designed for…"><meta property="og:image" content="https://sensors.social/og-altruist-use-cases-all.webp"><meta property="og:image:width" content="1280"><meta property="og:image:height" content="765"><meta property="og:url" content="https://sensors.social/altruist-use-cases"><meta name="twitter:card" content="summary_large_image"><meta name="twitter:title" content="Who Altruist Was Created For - Sensors use cases"><meta name="twitter:image" content="https://sensors.social/og-altruist-use-cases-all.webp"><meta name="twitter:description" content="Monitoring the environment involves plenty of pitfalls, making the job far harder than it looks at first glance. Our team—the creators of Altruist and the open-source project sensors.social—has spent seven years studying and working in this field, and we hope our experience will pleasantly surprise you and give you a practical tool for adapting to the conditions in which you and your loved ones live. Below we explain which main user groups Altruist is designed for…"><meta name="twitter:site" content="@AIRA_Robonomics"><meta name="twitter:creator" content="@AIRA_Robonomics"></head>
+  <body>
+    <div id="app" data-v-app=""><!----><header class="route-altruist-use-cases" data-v-1f3b7ad1="" data-v-4ab60bba=""><div class="header-content flexline space-between" data-v-1f3b7ad1=""><div class="flexline align-start" data-v-1f3b7ad1=""><a href="/" class="appicon" data-v-1f3b7ad1=""><img alt="Map of independent air quality sensors" src="/assets/app-icon-512.c18bf4f0.png" data-v-1f3b7ad1=""></a><!----></div><div class="flexline" data-v-1f3b7ad1=""><div id="about" class="popover popover-top-right" popover="" data-v-1f3b7ad1=""><h3 data-v-1f3b7ad1="">Web3 public sensors map</h3><p data-v-1f3b7ad1="">Welcome to the decentralized opensource sensors map which operates with the sole intent of serving <a href="https://www.fsf.org/campaigns/priority-projects/decentralization-federation" target="_blank" rel="noopener" data-v-1f3b7ad1="">the free will of individuals</a> , without any beneficiaries. It offers two distinct layers of decentralization at your choise: peer-to-peer connectivity for direct access to sensor data, and the federative concept for accumulating sensor data and displaying measurement history. Click <a href="https://robonomics.academy/en/learn/sensors-connectivity-course/sensors-connectivity-module/" target="_blank" rel="noopener" data-v-1f3b7ad1="">here</a> for further technical details.</p><p data-v-1f3b7ad1="">Map data © <a href="https://www.openstreetmap.org/copyright" target="_blank" data-v-1f3b7ad1="">OpenStreetMap contributors</a></p><section class="navlinks" data-v-1f3b7ad1=""><a aria-current="page" href="/altruist-use-cases/" class="router-link-active router-link-exact-active" data-v-1f3b7ad1="">Altruist use cases</a><a href="/altruist-timeline/" class="" data-v-1f3b7ad1="">Altruist timeline</a><a href="/altruist-compare/" class="" data-v-1f3b7ad1="">Altruist comparison table</a><a href="/air-measurements/" class="" data-v-1f3b7ad1="">Measurements guide</a><a href="/privacy-policy/" class="" data-v-1f3b7ad1="">Privacy policy</a></section><section data-v-49bc694b="" data-v-1f3b7ad1=""><p data-v-49bc694b=""><a href="https://github.com/airalab/sensors.robonomics.network" target="_blank" rel="noopener" data-v-49bc694b=""><b data-v-49bc694b="">airalab/sensors.social v4.0.3</b></a></p><div data-v-49bc694b=""><b data-v-49bc694b="">Secured by</b></div><img alt="" src="/assets/polkadot-new-dot-logo-horizontal.5c15bc80.svg" class="polkadotLogo" data-v-49bc694b=""></section><div class="locale-select-container" data-v-1f3b7ad1=""><select data-v-1f3b7ad1=""><option value="en" data-v-1f3b7ad1="">EN</option><option value="ru" data-v-1f3b7ad1="">RU</option></select></div></div><button class="popovercontrol button-round-outline" popovertarget="about" data-v-1f3b7ad1=""><svg class="svg-inline--fa fa-bars" aria-hidden="true" focusable="false" data-prefix="fas" data-icon="bars" role="img" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512" data-v-1f3b7ad1=""><path class="" fill="currentColor" d="M0 96C0 78.3 14.3 64 32 64l384 0c17.7 0 32 14.3 32 32s-14.3 32-32 32L32 128C14.3 128 0 113.7 0 96zM0 256c0-17.7 14.3-32 32-32l384 0c17.7 0 32 14.3 32 32s-14.3 32-32 32L32 288c-17.7 0-32-14.3-32-32zM448 416c0 17.7-14.3 32-32 32L32 448c-17.7 0-32-14.3-32-32s14.3-32 32-32l384 0c17.7 0 32 14.3 32 32z"></path></svg></button><div id="bookmarks" class="popover-top-right popover" popover="" data-v-1f3b7ad1=""><h3 data-v-1f3b7ad1="">Your bookmarked sensors</h3><div class="bookmarks-content" data-v-1f3b7ad1="">Save any sensor from the map here for quicker access</div></div><button class="popovercontrol button-round-outline bookmarksbutton" popovertarget="bookmarks" data-v-1f3b7ad1=""><svg class="svg-inline--fa fa-bookmark" aria-hidden="true" focusable="false" data-prefix="far" data-icon="bookmark" role="img" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 384 512" data-v-1f3b7ad1=""><path class="" fill="currentColor" d="M0 64C0 28.7 28.7 0 64 0L320 0c35.3 0 64 28.7 64 64l0 417.1c0 25.6-28.5 40.8-49.8 26.6L192 412.8 49.8 507.7C28.5 521.9 0 506.6 0 481.1L0 64zM64 48c-8.8 0-16 7.2-16 16l0 387.2 117.4-78.2c16.1-10.7 37.1-10.7 53.2 0L336 451.2 336 64c0-8.8-7.2-16-16-16L64 48z"></path></svg><!----></button><!----></div></div></header><section class="container-pagetext" data-v-4ab60bba=""><h1>Who Altruist Was Created For</h1><section class="pagetext-highlight"><p>Monitoring the environment involves plenty of pitfalls, making the job far harder than it looks at first glance. Our team—the creators of Altruist and the open-source project sensors.social—has spent seven years studying and working in this field, and we hope our experience will pleasantly surprise you and give you a practical tool for adapting to the conditions in which you and your loved ones live. Below we explain which main user groups Altruist is designed for…</p></section><section><h2>🏙️ You live in a big city or an ecologically challenged region</h2><p><img src="/assets/altruist-use-cases-1.9adf64b4.webp" alt="" class="pagetext-fullwidth-image"></p><p>Think of it as a little adventure: getting to know your city better. The top-priority reason to buy a home air-quality station is to gain solid knowledge of what is happening indoors and outside throughout the year so you can adapt accordingly.</p><p>There’s always something to worry about, but it’s best not to let the extremes—“nothing is happening” vs. “everything is definitely bad”—take root. After seven years working with citizen air-quality monitoring around the world, we can assure you that personal, quantitative monitoring shows the real situation right where you live. After a year with Altruist you will see, in clear graphs with insights from the developers, how air quality varies by time of day, season, the operation of waste-incineration plants, industrial sites, power stations, seasonal fires, dust storms… and you’ll form an objective view of what is happening right outside your window—and adapt to it.</p><details class="details-link"><summary>Altruist features for urban conditions</summary><ul><li><b>Street-grade particle sensor</b> — tough enough to hang outside yet still fine indoors. If you mount Altruist Urban outside your window it won’t “choke” after the first sand truck rumbles past.</li><li><b>Outdoor noise measurement</b> — Altruist is currently the only product in its class that adds a city-grade noise sensor, covering another important urban factor.</li></ul></details></section><section><h2>🤧🌿 You or your loved ones have allergies or bronchial asthma</h2><p><img src="/assets/altruist-use-cases-2.7ed2d8a2.webp" alt="" class="pagetext-fullwidth-image"></p><p>Some of Altruist’s developers suffer from house-dust allergy; one of us spent childhood in hospital every few weeks with asthma attacks. Life is harder for such people, so it is especially important to help them control indoor air quality.</p><details class="details-link"><summary>How Altruist helps allergy and asthma sufferers</summary><ul><li><b>Room profiling</b> for particulate matter and humidity: in the first week you will get 24-hour snapshots with highlighted insights—graphs that let you compare rooms instead of staring at bare numbers.</li><li><b>Ventilation hints</b> an Altruist on the balcony or even on a windowsill will warn you when outdoor air is bad so you can close the windows, turn on the purifier and postpone walks until traffic or a dust storm subsides.</li><li><b>Children’s rooms</b> place a unit there to spot dust problems early and reduce the risk of developing dust allergy.</li></ul></details></section><section><h2>🛠️🏠 You are building a smart home</h2><p><img src="/assets/altruist-use-cases-3.7aef53c2.webp" alt="" class="pagetext-fullwidth-image"></p><p>Most of our team are engineers who automate their homes. We provide an official integration in Home Assistant Store so you can add Altruist to your local smart-home setup in two clicks, plus ready-made automation blueprints that need no coding.</p><details class="details-link"><summary>How Altruist is useful for a DIY smart-home engineer</summary><ul><li><b>RGB lamp indicator</b> — link any parameter to a smart bulb so your room quietly signals changes (no need to turn the whole living-room red just because Grandpa lights his pipe on the balcony).</li><li><b>Air-purifier trigger</b> — start a purifier inside whenever the outdoor unit detects smoke or dust.</li><li><b>Air-conditioner control</b> — react automatically to rising outdoor humidity or temperature at dawn.</li></ul></details></section><section><h2> 🕵️‍♂️📈 You like to support community initiatives independent of governments and corporations</h2><p><img src="/assets/altruist-use-cases-4.bd117917.webp" alt="" class="pagetext-fullwidth-image"></p><p>Become a data source and join other Altruists to build a citizen network monitoring environmental issues in your region. The developers have open-sourced the entire sensors.social backend so local communities can launch an independent sensor map.</p><details class="details-link"><summary>How Altruist helps independent monitoring</summary><ul><li><b>Trusted hardware</b> — open-source and field-tested by thousands of users, easy to recommend to neighbours.</li><li><b>Your own map in one day</b> — clone the GitHub repo, deploy on any domain and run a fully independent service that even the Altruist developers can’t interfere with.</li></ul></details></section><section class="pagetext-highlight"><p>The most fascinating lesson from seven years of experiments is the sheer diversity of motives, methods and analysis styles in environmental monitoring—from health concerns to activism, from outdated test tubes to high-end sampling stations, from smiley-faces to daily graphs. It all makes the task far more complex than it first appears, but we hope our team’s perspective embodied in Altruist and sensors.social will delight you and give you a useful tool for adapting to your environment.</p></section><section data-v-10108b73=""><h2 data-v-10108b73="">Air Sensor Comparison Table</h2><!----><table data-v-10108b73=""><thead data-v-10108b73=""><tr data-v-10108b73=""><th data-v-10108b73="">Model</th><th data-v-10108b73="">Altruist Urban &amp; Insight</th><th data-v-10108b73="">PurpleAir Zen</th><th data-v-10108b73="">AirGradient Indoor &amp; Outdoor</th><th data-v-10108b73="">Netatmo Weather Station</th><th data-v-10108b73="">AirVisual Pro &amp; Outdoor</th></tr><tr data-v-10108b73=""><th data-v-10108b73="">Photo</th><th data-v-10108b73=""><img src="/assets/Altruist-bundle.6dfccaab.webp" alt="Altruist Urban &amp; Insight device" class="device-photo" data-v-10108b73=""></th><th data-v-10108b73=""><img src="/assets/purpleAir-device.6775a38b.webp" alt="PurpleAir Zen device" class="device-photo" data-v-10108b73=""></th><th data-v-10108b73=""><img src="/assets/airGradient-device.a1116f82.webp" alt="AirGradient Indoor &amp; Outdoor device" class="device-photo" data-v-10108b73=""></th><th data-v-10108b73=""><img src="/assets/netatmo-device.6865615e.webp" alt="Netatmo Weather Station device" class="device-photo" data-v-10108b73=""></th><th data-v-10108b73=""><img src="/assets/airvisual-device.db8791c5.webp" alt="AirVisual Pro &amp; Outdoor device" class="device-photo" data-v-10108b73=""></th></tr></thead><tbody data-v-10108b73=""><tr data-v-10108b73=""><td data-v-10108b73="">Price</td><td class="" data-v-10108b73=""><div class="device-mobile-label" data-v-10108b73=""><img src="/assets/Altruist-bundle.6dfccaab.webp" alt="Altruist Urban &amp; Insight" class="device-label-img" data-v-10108b73=""><span class="device-label-title" data-v-10108b73="">Altruist Urban &amp; Insight</span></div><a href="https://www.indiegogo.com/projects/altruist-air-quality-bundle-urban-insight?utm_source=sensors.social&amp;utm_medium=compare" target="_blank" data-v-10108b73=""><b data-v-10108b73="">€189 ($221)</b></a></td><td class="" data-v-10108b73=""><div class="device-mobile-label" data-v-10108b73=""><img src="/assets/purpleAir-device.6775a38b.webp" alt="PurpleAir Zen" class="device-label-img" data-v-10108b73=""><span class="device-label-title" data-v-10108b73="">PurpleAir Zen</span></div><a href="https://www2.purpleair.com/products/purpleair-zen" target="_blank" data-v-10108b73=""><b data-v-10108b73="">€254 ($299)</b></a></td><td class="" data-v-10108b73=""><div class="device-mobile-label" data-v-10108b73=""><img src="/assets/airGradient-device.a1116f82.webp" alt="AirGradient Indoor &amp; Outdoor" class="device-label-img" data-v-10108b73=""><span class="device-label-title" data-v-10108b73="">AirGradient Indoor &amp; Outdoor</span></div><a href="https://www.airgradient.com" target="_blank" data-v-10108b73=""><b data-v-10108b73="">€328 ($385)</b></a></td><td class="" data-v-10108b73=""><div class="device-mobile-label" data-v-10108b73=""><img src="/assets/netatmo-device.6865615e.webp" alt="Netatmo Weather Station" class="device-label-img" data-v-10108b73=""><span class="device-label-title" data-v-10108b73="">Netatmo Weather Station</span></div><a href="https://www.netatmo.com/en-gb/weather-station-original-sand" target="_blank" data-v-10108b73=""><b data-v-10108b73="">€152 ($179)</b></a></td><td class="" data-v-10108b73=""><div class="device-mobile-label" data-v-10108b73=""><img src="/assets/airvisual-device.db8791c5.webp" alt="AirVisual Pro &amp; Outdoor" class="device-label-img" data-v-10108b73=""><span class="device-label-title" data-v-10108b73="">AirVisual Pro &amp; Outdoor</span></div><a href="https://www.iqair.com/us/air-quality-monitors" target="_blank" data-v-10108b73=""><b data-v-10108b73="">€638 ($748)</b></a></td></tr><tr data-v-10108b73=""><td data-v-10108b73="">Type</td><td class="" data-v-10108b73=""><div class="device-mobile-label" data-v-10108b73=""><img src="/assets/Altruist-bundle.6dfccaab.webp" alt="Altruist Urban &amp; Insight" class="device-label-img" data-v-10108b73=""><span class="device-label-title" data-v-10108b73="">Altruist Urban &amp; Insight</span></div>Dual-module, outdoor and indoor</td><td class="" data-v-10108b73=""><div class="device-mobile-label" data-v-10108b73=""><img src="/assets/purpleAir-device.6775a38b.webp" alt="PurpleAir Zen" class="device-label-img" data-v-10108b73=""><span class="device-label-title" data-v-10108b73="">PurpleAir Zen</span></div>Can be outdoor or indoor</td><td class="" data-v-10108b73=""><div class="device-mobile-label" data-v-10108b73=""><img src="/assets/airGradient-device.a1116f82.webp" alt="AirGradient Indoor &amp; Outdoor" class="device-label-img" data-v-10108b73=""><span class="device-label-title" data-v-10108b73="">AirGradient Indoor &amp; Outdoor</span></div>Two separate modules</td><td class="" data-v-10108b73=""><div class="device-mobile-label" data-v-10108b73=""><img src="/assets/netatmo-device.6865615e.webp" alt="Netatmo Weather Station" class="device-label-img" data-v-10108b73=""><span class="device-label-title" data-v-10108b73="">Netatmo Weather Station</span></div>Dual-module, outdoor and indoor</td><td class="" data-v-10108b73=""><div class="device-mobile-label" data-v-10108b73=""><img src="/assets/airvisual-device.db8791c5.webp" alt="AirVisual Pro &amp; Outdoor" class="device-label-img" data-v-10108b73=""><span class="device-label-title" data-v-10108b73="">AirVisual Pro &amp; Outdoor</span></div>Two separate modules</td></tr><tr data-v-10108b73=""><td data-v-10108b73="">Particle Sensor</td><td class="mark-good" data-v-10108b73=""><div class="device-mobile-label" data-v-10108b73=""><img src="/assets/Altruist-bundle.6dfccaab.webp" alt="Altruist Urban &amp; Insight" class="device-label-img" data-v-10108b73=""><span class="device-label-title" data-v-10108b73="">Altruist Urban &amp; Insight</span></div>Yes</td><td class="mark-good" data-v-10108b73=""><div class="device-mobile-label" data-v-10108b73=""><img src="/assets/purpleAir-device.6775a38b.webp" alt="PurpleAir Zen" class="device-label-img" data-v-10108b73=""><span class="device-label-title" data-v-10108b73="">PurpleAir Zen</span></div>Yes</td><td class="mark-good" data-v-10108b73=""><div class="device-mobile-label" data-v-10108b73=""><img src="/assets/airGradient-device.a1116f82.webp" alt="AirGradient Indoor &amp; Outdoor" class="device-label-img" data-v-10108b73=""><span class="device-label-title" data-v-10108b73="">AirGradient Indoor &amp; Outdoor</span></div>Yes</td><td class="mark-bad" data-v-10108b73=""><div class="device-mobile-label" data-v-10108b73=""><img src="/assets/netatmo-device.6865615e.webp" alt="Netatmo Weather Station" class="device-label-img" data-v-10108b73=""><span class="device-label-title" data-v-10108b73="">Netatmo Weather Station</span></div>No</td><td class="mark-good" data-v-10108b73=""><div class="device-mobile-label" data-v-10108b73=""><img src="/assets/airvisual-device.db8791c5.webp" alt="AirVisual Pro &amp; Outdoor" class="device-label-img" data-v-10108b73=""><span class="device-label-title" data-v-10108b73="">AirVisual Pro &amp; Outdoor</span></div>Yes</td></tr><tr data-v-10108b73=""><td data-v-10108b73="">Urban Noise Sensor</td><td class="mark-good" data-v-10108b73=""><div class="device-mobile-label" data-v-10108b73=""><img src="/assets/Altruist-bundle.6dfccaab.webp" alt="Altruist Urban &amp; Insight" class="device-label-img" data-v-10108b73=""><span class="device-label-title" data-v-10108b73="">Altruist Urban &amp; Insight</span></div>Yes</td><td class="mark-bad" data-v-10108b73=""><div class="device-mobile-label" data-v-10108b73=""><img src="/assets/purpleAir-device.6775a38b.webp" alt="PurpleAir Zen" class="device-label-img" data-v-10108b73=""><span class="device-label-title" data-v-10108b73="">PurpleAir Zen</span></div>No</td><td class="mark-bad" data-v-10108b73=""><div class="device-mobile-label" data-v-10108b73=""><img src="/assets/airGradient-device.a1116f82.webp" alt="AirGradient Indoor &amp; Outdoor" class="device-label-img" data-v-10108b73=""><span class="device-label-title" data-v-10108b73="">AirGradient Indoor &amp; Outdoor</span></div>No</td><td class="mark-neutral" data-v-10108b73=""><div class="device-mobile-label" data-v-10108b73=""><img src="/assets/netatmo-device.6865615e.webp" alt="Netatmo Weather Station" class="device-label-img" data-v-10108b73=""><span class="device-label-title" data-v-10108b73="">Netatmo Weather Station</span></div>Only indoor</td><td class="mark-bad" data-v-10108b73=""><div class="device-mobile-label" data-v-10108b73=""><img src="/assets/airvisual-device.db8791c5.webp" alt="AirVisual Pro &amp; Outdoor" class="device-label-img" data-v-10108b73=""><span class="device-label-title" data-v-10108b73="">AirVisual Pro &amp; Outdoor</span></div>No</td></tr><tr data-v-10108b73=""><td data-v-10108b73="">Indoor CO2</td><td class="mark-good" data-v-10108b73=""><div class="device-mobile-label" data-v-10108b73=""><img src="/assets/Altruist-bundle.6dfccaab.webp" alt="Altruist Urban &amp; Insight" class="device-label-img" data-v-10108b73=""><span class="device-label-title" data-v-10108b73="">Altruist Urban &amp; Insight</span></div>Yes</td><td class="mark-bad" data-v-10108b73=""><div class="device-mobile-label" data-v-10108b73=""><img src="/assets/purpleAir-device.6775a38b.webp" alt="PurpleAir Zen" class="device-label-img" data-v-10108b73=""><span class="device-label-title" data-v-10108b73="">PurpleAir Zen</span></div>No</td><td class="mark-good" data-v-10108b73=""><div class="device-mobile-label" data-v-10108b73=""><img src="/assets/airGradient-device.a1116f82.webp" alt="AirGradient Indoor &amp; Outdoor" class="device-label-img" data-v-10108b73=""><span class="device-label-title" data-v-10108b73="">AirGradient Indoor &amp; Outdoor</span></div>Yes</td><td class="mark-good" data-v-10108b73=""><div class="device-mobile-label" data-v-10108b73=""><img src="/assets/netatmo-device.6865615e.webp" alt="Netatmo Weather Station" class="device-label-img" data-v-10108b73=""><span class="device-label-title" data-v-10108b73="">Netatmo Weather Station</span></div>Yes</td><td class="mark-good" data-v-10108b73=""><div class="device-mobile-label" data-v-10108b73=""><img src="/assets/airvisual-device.db8791c5.webp" alt="AirVisual Pro &amp; Outdoor" class="device-label-img" data-v-10108b73=""><span class="device-label-title" data-v-10108b73="">AirVisual Pro &amp; Outdoor</span></div>Yes</td></tr><tr data-v-10108b73=""><td data-v-10108b73="">User Interface on Device</td><td class="mark-neutral" data-v-10108b73=""><div class="device-mobile-label" data-v-10108b73=""><img src="/assets/Altruist-bundle.6dfccaab.webp" alt="Altruist Urban &amp; Insight" class="device-label-img" data-v-10108b73=""><span class="device-label-title" data-v-10108b73="">Altruist Urban &amp; Insight</span></div>LED indication on Urban + E-ink screen on Insight</td><td class="mark-neutral" data-v-10108b73=""><div class="device-mobile-label" data-v-10108b73=""><img src="/assets/purpleAir-device.6775a38b.webp" alt="PurpleAir Zen" class="device-label-img" data-v-10108b73=""><span class="device-label-title" data-v-10108b73="">PurpleAir Zen</span></div>Only LED strip</td><td class="mark-neutral" data-v-10108b73=""><div class="device-mobile-label" data-v-10108b73=""><img src="/assets/airGradient-device.a1116f82.webp" alt="AirGradient Indoor &amp; Outdoor" class="device-label-img" data-v-10108b73=""><span class="device-label-title" data-v-10108b73="">AirGradient Indoor &amp; Outdoor</span></div>LED indication and small screen on Indoor</td><td class="mark-neutral" data-v-10108b73=""><div class="device-mobile-label" data-v-10108b73=""><img src="/assets/netatmo-device.6865615e.webp" alt="Netatmo Weather Station" class="device-label-img" data-v-10108b73=""><span class="device-label-title" data-v-10108b73="">Netatmo Weather Station</span></div>Only LED strip</td><td class="mark-neutral" data-v-10108b73=""><div class="device-mobile-label" data-v-10108b73=""><img src="/assets/airvisual-device.db8791c5.webp" alt="AirVisual Pro &amp; Outdoor" class="device-label-img" data-v-10108b73=""><span class="device-label-title" data-v-10108b73="">AirVisual Pro &amp; Outdoor</span></div>LED indication on Outdoor and LCD screen on Pro</td></tr><tr data-v-10108b73=""><td data-v-10108b73="">microSD Support</td><td class="mark-good" data-v-10108b73=""><div class="device-mobile-label" data-v-10108b73=""><img src="/assets/Altruist-bundle.6dfccaab.webp" alt="Altruist Urban &amp; Insight" class="device-label-img" data-v-10108b73=""><span class="device-label-title" data-v-10108b73="">Altruist Urban &amp; Insight</span></div>Yes</td><td class="mark-good" data-v-10108b73=""><div class="device-mobile-label" data-v-10108b73=""><img src="/assets/purpleAir-device.6775a38b.webp" alt="PurpleAir Zen" class="device-label-img" data-v-10108b73=""><span class="device-label-title" data-v-10108b73="">PurpleAir Zen</span></div>Yes</td><td class="mark-bad" data-v-10108b73=""><div class="device-mobile-label" data-v-10108b73=""><img src="/assets/airGradient-device.a1116f82.webp" alt="AirGradient Indoor &amp; Outdoor" class="device-label-img" data-v-10108b73=""><span class="device-label-title" data-v-10108b73="">AirGradient Indoor &amp; Outdoor</span></div>No</td><td class="mark-bad" data-v-10108b73=""><div class="device-mobile-label" data-v-10108b73=""><img src="/assets/netatmo-device.6865615e.webp" alt="Netatmo Weather Station" class="device-label-img" data-v-10108b73=""><span class="device-label-title" data-v-10108b73="">Netatmo Weather Station</span></div>No</td><td class="mark-bad" data-v-10108b73=""><div class="device-mobile-label" data-v-10108b73=""><img src="/assets/airvisual-device.db8791c5.webp" alt="AirVisual Pro &amp; Outdoor" class="device-label-img" data-v-10108b73=""><span class="device-label-title" data-v-10108b73="">AirVisual Pro &amp; Outdoor</span></div>No</td></tr><tr data-v-10108b73=""><td data-v-10108b73="">Power Connector</td><td class="mark-good" data-v-10108b73=""><div class="device-mobile-label" data-v-10108b73=""><img src="/assets/Altruist-bundle.6dfccaab.webp" alt="Altruist Urban &amp; Insight" class="device-label-img" data-v-10108b73=""><span class="device-label-title" data-v-10108b73="">Altruist Urban &amp; Insight</span></div>USB Type-C</td><td class="mark-bad" data-v-10108b73=""><div class="device-mobile-label" data-v-10108b73=""><img src="/assets/purpleAir-device.6775a38b.webp" alt="PurpleAir Zen" class="device-label-img" data-v-10108b73=""><span class="device-label-title" data-v-10108b73="">PurpleAir Zen</span></div>Micro USB</td><td class="mark-good" data-v-10108b73=""><div class="device-mobile-label" data-v-10108b73=""><img src="/assets/airGradient-device.a1116f82.webp" alt="AirGradient Indoor &amp; Outdoor" class="device-label-img" data-v-10108b73=""><span class="device-label-title" data-v-10108b73="">AirGradient Indoor &amp; Outdoor</span></div>USB Type-C</td><td class="mark-bad" data-v-10108b73=""><div class="device-mobile-label" data-v-10108b73=""><img src="/assets/netatmo-device.6865615e.webp" alt="Netatmo Weather Station" class="device-label-img" data-v-10108b73=""><span class="device-label-title" data-v-10108b73="">Netatmo Weather Station</span></div>Micro USB</td><td class="mark-neutral" data-v-10108b73=""><div class="device-mobile-label" data-v-10108b73=""><img src="/assets/airvisual-device.db8791c5.webp" alt="AirVisual Pro &amp; Outdoor" class="device-label-img" data-v-10108b73=""><span class="device-label-title" data-v-10108b73="">AirVisual Pro &amp; Outdoor</span></div>Micro USB on Pro &amp; Ethernet PoE on Outdoor</td></tr><tr data-v-10108b73=""><td data-v-10108b73="">Housing</td><td class="mark-good" data-v-10108b73=""><div class="device-mobile-label" data-v-10108b73=""><img src="/assets/Altruist-bundle.6dfccaab.webp" alt="Altruist Urban &amp; Insight" class="device-label-img" data-v-10108b73=""><span class="device-label-title" data-v-10108b73="">Altruist Urban &amp; Insight</span></div>3D printed, different colors and icons</td><td class="mark-bad" data-v-10108b73=""><div class="device-mobile-label" data-v-10108b73=""><img src="/assets/purpleAir-device.6775a38b.webp" alt="PurpleAir Zen" class="device-label-img" data-v-10108b73=""><span class="device-label-title" data-v-10108b73="">PurpleAir Zen</span></div>Only one color available</td><td class="mark-bad" data-v-10108b73=""><div class="device-mobile-label" data-v-10108b73=""><img src="/assets/airGradient-device.a1116f82.webp" alt="AirGradient Indoor &amp; Outdoor" class="device-label-img" data-v-10108b73=""><span class="device-label-title" data-v-10108b73="">AirGradient Indoor &amp; Outdoor</span></div>Only one color available</td><td class="mark-bad" data-v-10108b73=""><div class="device-mobile-label" data-v-10108b73=""><img src="/assets/netatmo-device.6865615e.webp" alt="Netatmo Weather Station" class="device-label-img" data-v-10108b73=""><span class="device-label-title" data-v-10108b73="">Netatmo Weather Station</span></div>Only one color available</td><td class="mark-bad" data-v-10108b73=""><div class="device-mobile-label" data-v-10108b73=""><img src="/assets/airvisual-device.db8791c5.webp" alt="AirVisual Pro &amp; Outdoor" class="device-label-img" data-v-10108b73=""><span class="device-label-title" data-v-10108b73="">AirVisual Pro &amp; Outdoor</span></div>Only one color available</td></tr><tr data-v-10108b73=""><td data-v-10108b73="">Water Protection</td><td class="mark-good" data-v-10108b73=""><div class="device-mobile-label" data-v-10108b73=""><img src="/assets/Altruist-bundle.6dfccaab.webp" alt="Altruist Urban &amp; Insight" class="device-label-img" data-v-10108b73=""><span class="device-label-title" data-v-10108b73="">Altruist Urban &amp; Insight</span></div>Fully sealed housing, air supply tube</td><td class="mark-bad" data-v-10108b73=""><div class="device-mobile-label" data-v-10108b73=""><img src="/assets/purpleAir-device.6775a38b.webp" alt="PurpleAir Zen" class="device-label-img" data-v-10108b73=""><span class="device-label-title" data-v-10108b73="">PurpleAir Zen</span></div>Unprotected open bottom of the sensor</td><td class="mark-good" data-v-10108b73=""><div class="device-mobile-label" data-v-10108b73=""><img src="/assets/airGradient-device.a1116f82.webp" alt="AirGradient Indoor &amp; Outdoor" class="device-label-img" data-v-10108b73=""><span class="device-label-title" data-v-10108b73="">AirGradient Indoor &amp; Outdoor</span></div>Fully sealed housing</td><td class="mark-good" data-v-10108b73=""><div class="device-mobile-label" data-v-10108b73=""><img src="/assets/netatmo-device.6865615e.webp" alt="Netatmo Weather Station" class="device-label-img" data-v-10108b73=""><span class="device-label-title" data-v-10108b73="">Netatmo Weather Station</span></div>Fully sealed housing</td><td class="mark-good" data-v-10108b73=""><div class="device-mobile-label" data-v-10108b73=""><img src="/assets/airvisual-device.db8791c5.webp" alt="AirVisual Pro &amp; Outdoor" class="device-label-img" data-v-10108b73=""><span class="device-label-title" data-v-10108b73="">AirVisual Pro &amp; Outdoor</span></div>Fully sealed housing</td></tr><tr data-v-10108b73=""><td data-v-10108b73="">UV Protection</td><td class="mark-good" data-v-10108b73=""><div class="device-mobile-label" data-v-10108b73=""><img src="/assets/Altruist-bundle.6dfccaab.webp" alt="Altruist Urban &amp; Insight" class="device-label-img" data-v-10108b73=""><span class="device-label-title" data-v-10108b73="">Altruist Urban &amp; Insight</span></div>Protective shield made of ASA plastic</td><td class="mark-bad" data-v-10108b73=""><div class="device-mobile-label" data-v-10108b73=""><img src="/assets/purpleAir-device.6775a38b.webp" alt="PurpleAir Zen" class="device-label-img" data-v-10108b73=""><span class="device-label-title" data-v-10108b73="">PurpleAir Zen</span></div>Not specified</td><td class="mark-good" data-v-10108b73=""><div class="device-mobile-label" data-v-10108b73=""><img src="/assets/airGradient-device.a1116f82.webp" alt="AirGradient Indoor &amp; Outdoor" class="device-label-img" data-v-10108b73=""><span class="device-label-title" data-v-10108b73="">AirGradient Indoor &amp; Outdoor</span></div>Housing is made of ASA plastic</td><td class="mark-bad" data-v-10108b73=""><div class="device-mobile-label" data-v-10108b73=""><img src="/assets/netatmo-device.6865615e.webp" alt="Netatmo Weather Station" class="device-label-img" data-v-10108b73=""><span class="device-label-title" data-v-10108b73="">Netatmo Weather Station</span></div>Not specified</td><td class="mark-good" data-v-10108b73=""><div class="device-mobile-label" data-v-10108b73=""><img src="/assets/airvisual-device.db8791c5.webp" alt="AirVisual Pro &amp; Outdoor" class="device-label-img" data-v-10108b73=""><span class="device-label-title" data-v-10108b73="">AirVisual Pro &amp; Outdoor</span></div>Yes</td></tr><tr data-v-10108b73=""><td data-v-10108b73="">Mandatory Cloud Connection</td><td class="mark-good" data-v-10108b73=""><div class="device-mobile-label" data-v-10108b73=""><img src="/assets/Altruist-bundle.6dfccaab.webp" alt="Altruist Urban &amp; Insight" class="device-label-img" data-v-10108b73=""><span class="device-label-title" data-v-10108b73="">Altruist Urban &amp; Insight</span></div>No</td><td class="mark-bad" data-v-10108b73=""><div class="device-mobile-label" data-v-10108b73=""><img src="/assets/purpleAir-device.6775a38b.webp" alt="PurpleAir Zen" class="device-label-img" data-v-10108b73=""><span class="device-label-title" data-v-10108b73="">PurpleAir Zen</span></div>Yes</td><td class="mark-good" data-v-10108b73=""><div class="device-mobile-label" data-v-10108b73=""><img src="/assets/airGradient-device.a1116f82.webp" alt="AirGradient Indoor &amp; Outdoor" class="device-label-img" data-v-10108b73=""><span class="device-label-title" data-v-10108b73="">AirGradient Indoor &amp; Outdoor</span></div>No</td><td class="mark-bad" data-v-10108b73=""><div class="device-mobile-label" data-v-10108b73=""><img src="/assets/netatmo-device.6865615e.webp" alt="Netatmo Weather Station" class="device-label-img" data-v-10108b73=""><span class="device-label-title" data-v-10108b73="">Netatmo Weather Station</span></div>Yes</td><td class="mark-bad" data-v-10108b73=""><div class="device-mobile-label" data-v-10108b73=""><img src="/assets/airvisual-device.db8791c5.webp" alt="AirVisual Pro &amp; Outdoor" class="device-label-img" data-v-10108b73=""><span class="device-label-title" data-v-10108b73="">AirVisual Pro &amp; Outdoor</span></div>Yes</td></tr><tr data-v-10108b73=""><td data-v-10108b73="">Local Device Management via IP</td><td class="mark-good" data-v-10108b73=""><div class="device-mobile-label" data-v-10108b73=""><img src="/assets/Altruist-bundle.6dfccaab.webp" alt="Altruist Urban &amp; Insight" class="device-label-img" data-v-10108b73=""><span class="device-label-title" data-v-10108b73="">Altruist Urban &amp; Insight</span></div>Full control over settings</td><td class="mark-bad" data-v-10108b73=""><div class="device-mobile-label" data-v-10108b73=""><img src="/assets/purpleAir-device.6775a38b.webp" alt="PurpleAir Zen" class="device-label-img" data-v-10108b73=""><span class="device-label-title" data-v-10108b73="">PurpleAir Zen</span></div>Most functions are not available, settings only via corporate cloud</td><td class="mark-neutral" data-v-10108b73=""><div class="device-mobile-label" data-v-10108b73=""><img src="/assets/airGradient-device.a1116f82.webp" alt="AirGradient Indoor &amp; Outdoor" class="device-label-img" data-v-10108b73=""><span class="device-label-title" data-v-10108b73="">AirGradient Indoor &amp; Outdoor</span></div>No, but available via Home Assistant</td><td class="mark-bad" data-v-10108b73=""><div class="device-mobile-label" data-v-10108b73=""><img src="/assets/netatmo-device.6865615e.webp" alt="Netatmo Weather Station" class="device-label-img" data-v-10108b73=""><span class="device-label-title" data-v-10108b73="">Netatmo Weather Station</span></div>No, only in the app</td><td class="mark-bad" data-v-10108b73=""><div class="device-mobile-label" data-v-10108b73=""><img src="/assets/airvisual-device.db8791c5.webp" alt="AirVisual Pro &amp; Outdoor" class="device-label-img" data-v-10108b73=""><span class="device-label-title" data-v-10108b73="">AirVisual Pro &amp; Outdoor</span></div>No, only in the app</td></tr><tr data-v-10108b73=""><td data-v-10108b73="">Online Air Quality Map by Community</td><td class="mark-good" data-v-10108b73=""><div class="device-mobile-label" data-v-10108b73=""><img src="/assets/Altruist-bundle.6dfccaab.webp" alt="Altruist Urban &amp; Insight" class="device-label-img" data-v-10108b73=""><span class="device-label-title" data-v-10108b73="">Altruist Urban &amp; Insight</span></div>Yes, optional</td><td class="mark-good" data-v-10108b73=""><div class="device-mobile-label" data-v-10108b73=""><img src="/assets/purpleAir-device.6775a38b.webp" alt="PurpleAir Zen" class="device-label-img" data-v-10108b73=""><span class="device-label-title" data-v-10108b73="">PurpleAir Zen</span></div>Yes, main entry point to view data</td><td class="mark-good" data-v-10108b73=""><div class="device-mobile-label" data-v-10108b73=""><img src="/assets/airGradient-device.a1116f82.webp" alt="AirGradient Indoor &amp; Outdoor" class="device-label-img" data-v-10108b73=""><span class="device-label-title" data-v-10108b73="">AirGradient Indoor &amp; Outdoor</span></div>Yes, optional</td><td class="mark-good" data-v-10108b73=""><div class="device-mobile-label" data-v-10108b73=""><img src="/assets/netatmo-device.6865615e.webp" alt="Netatmo Weather Station" class="device-label-img" data-v-10108b73=""><span class="device-label-title" data-v-10108b73="">Netatmo Weather Station</span></div>Yes, optional</td><td class="mark-good" data-v-10108b73=""><div class="device-mobile-label" data-v-10108b73=""><img src="/assets/airvisual-device.db8791c5.webp" alt="AirVisual Pro &amp; Outdoor" class="device-label-img" data-v-10108b73=""><span class="device-label-title" data-v-10108b73="">AirVisual Pro &amp; Outdoor</span></div>Yes, optional</td></tr><tr data-v-10108b73=""><td data-v-10108b73="">Home Assistant Integration</td><td class="mark-good" data-v-10108b73=""><div class="device-mobile-label" data-v-10108b73=""><img src="/assets/Altruist-bundle.6dfccaab.webp" alt="Altruist Urban &amp; Insight" class="device-label-img" data-v-10108b73=""><span class="device-label-title" data-v-10108b73="">Altruist Urban &amp; Insight</span></div>Yes, only the HA addon is needed</td><td class="mark-bad" data-v-10108b73=""><div class="device-mobile-label" data-v-10108b73=""><img src="/assets/purpleAir-device.6775a38b.webp" alt="PurpleAir Zen" class="device-label-img" data-v-10108b73=""><span class="device-label-title" data-v-10108b73="">PurpleAir Zen</span></div>Yes, but limited API and cloud connection are required</td><td class="mark-good" data-v-10108b73=""><div class="device-mobile-label" data-v-10108b73=""><img src="/assets/airGradient-device.a1116f82.webp" alt="AirGradient Indoor &amp; Outdoor" class="device-label-img" data-v-10108b73=""><span class="device-label-title" data-v-10108b73="">AirGradient Indoor &amp; Outdoor</span></div>Yes, only the HA addon is needed</td><td class="mark-good" data-v-10108b73=""><div class="device-mobile-label" data-v-10108b73=""><img src="/assets/netatmo-device.6865615e.webp" alt="Netatmo Weather Station" class="device-label-img" data-v-10108b73=""><span class="device-label-title" data-v-10108b73="">Netatmo Weather Station</span></div>Yes, only the HA addon is needed</td><td class="mark-bad" data-v-10108b73=""><div class="device-mobile-label" data-v-10108b73=""><img src="/assets/airvisual-device.db8791c5.webp" alt="AirVisual Pro &amp; Outdoor" class="device-label-img" data-v-10108b73=""><span class="device-label-title" data-v-10108b73="">AirVisual Pro &amp; Outdoor</span></div>Yes, but only for Pro</td></tr><tr data-v-10108b73=""><td data-v-10108b73="">Data Control and Ownership</td><td class="mark-good" data-v-10108b73=""><div class="device-mobile-label" data-v-10108b73=""><img src="/assets/Altruist-bundle.6dfccaab.webp" alt="Altruist Urban &amp; Insight" class="device-label-img" data-v-10108b73=""><span class="device-label-title" data-v-10108b73="">Altruist Urban &amp; Insight</span></div>The user owns the data and controls its distribution</td><td class="mark-bad" data-v-10108b73=""><div class="device-mobile-label" data-v-10108b73=""><img src="/assets/purpleAir-device.6775a38b.webp" alt="PurpleAir Zen" class="device-label-img" data-v-10108b73=""><span class="device-label-title" data-v-10108b73="">PurpleAir Zen</span></div>The company owns the data, but users can view and export it with some limitations</td><td class="mark-good" data-v-10108b73=""><div class="device-mobile-label" data-v-10108b73=""><img src="/assets/airGradient-device.a1116f82.webp" alt="AirGradient Indoor &amp; Outdoor" class="device-label-img" data-v-10108b73=""><span class="device-label-title" data-v-10108b73="">AirGradient Indoor &amp; Outdoor</span></div>The user owns the data and controls its distribution</td><td class="mark-bad" data-v-10108b73=""><div class="device-mobile-label" data-v-10108b73=""><img src="/assets/netatmo-device.6865615e.webp" alt="Netatmo Weather Station" class="device-label-img" data-v-10108b73=""><span class="device-label-title" data-v-10108b73="">Netatmo Weather Station</span></div>Officially owned by users, but they must consent to the company's use of their data</td><td class="mark-bad" data-v-10108b73=""><div class="device-mobile-label" data-v-10108b73=""><img src="/assets/airvisual-device.db8791c5.webp" alt="AirVisual Pro &amp; Outdoor" class="device-label-img" data-v-10108b73=""><span class="device-label-title" data-v-10108b73="">AirVisual Pro &amp; Outdoor</span></div>Officially owned by users, but they must consent to the company's use of their data</td></tr><tr data-v-10108b73=""><td data-v-10108b73="">Open Source and Hardware</td><td class="mark-good" data-v-10108b73=""><div class="device-mobile-label" data-v-10108b73=""><img src="/assets/Altruist-bundle.6dfccaab.webp" alt="Altruist Urban &amp; Insight" class="device-label-img" data-v-10108b73=""><span class="device-label-title" data-v-10108b73="">Altruist Urban &amp; Insight</span></div>Yes</td><td class="mark-bad" data-v-10108b73=""><div class="device-mobile-label" data-v-10108b73=""><img src="/assets/purpleAir-device.6775a38b.webp" alt="PurpleAir Zen" class="device-label-img" data-v-10108b73=""><span class="device-label-title" data-v-10108b73="">PurpleAir Zen</span></div>No</td><td class="mark-good" data-v-10108b73=""><div class="device-mobile-label" data-v-10108b73=""><img src="/assets/airGradient-device.a1116f82.webp" alt="AirGradient Indoor &amp; Outdoor" class="device-label-img" data-v-10108b73=""><span class="device-label-title" data-v-10108b73="">AirGradient Indoor &amp; Outdoor</span></div>Yes</td><td class="mark-bad" data-v-10108b73=""><div class="device-mobile-label" data-v-10108b73=""><img src="/assets/netatmo-device.6865615e.webp" alt="Netatmo Weather Station" class="device-label-img" data-v-10108b73=""><span class="device-label-title" data-v-10108b73="">Netatmo Weather Station</span></div>No</td><td class="mark-bad" data-v-10108b73=""><div class="device-mobile-label" data-v-10108b73=""><img src="/assets/airvisual-device.db8791c5.webp" alt="AirVisual Pro &amp; Outdoor" class="device-label-img" data-v-10108b73=""><span class="device-label-title" data-v-10108b73="">AirVisual Pro &amp; Outdoor</span></div>No</td></tr><tr data-v-10108b73=""><td data-v-10108b73="">Custom Firmware and DIY-mods</td><td class="mark-good" data-v-10108b73=""><div class="device-mobile-label" data-v-10108b73=""><img src="/assets/Altruist-bundle.6dfccaab.webp" alt="Altruist Urban &amp; Insight" class="device-label-img" data-v-10108b73=""><span class="device-label-title" data-v-10108b73="">Altruist Urban &amp; Insight</span></div>Yes</td><td class="mark-bad" data-v-10108b73=""><div class="device-mobile-label" data-v-10108b73=""><img src="/assets/purpleAir-device.6775a38b.webp" alt="PurpleAir Zen" class="device-label-img" data-v-10108b73=""><span class="device-label-title" data-v-10108b73="">PurpleAir Zen</span></div>No</td><td class="mark-good" data-v-10108b73=""><div class="device-mobile-label" data-v-10108b73=""><img src="/assets/airGradient-device.a1116f82.webp" alt="AirGradient Indoor &amp; Outdoor" class="device-label-img" data-v-10108b73=""><span class="device-label-title" data-v-10108b73="">AirGradient Indoor &amp; Outdoor</span></div>Yes</td><td class="mark-bad" data-v-10108b73=""><div class="device-mobile-label" data-v-10108b73=""><img src="/assets/netatmo-device.6865615e.webp" alt="Netatmo Weather Station" class="device-label-img" data-v-10108b73=""><span class="device-label-title" data-v-10108b73="">Netatmo Weather Station</span></div>No</td><td class="mark-bad" data-v-10108b73=""><div class="device-mobile-label" data-v-10108b73=""><img src="/assets/airvisual-device.db8791c5.webp" alt="AirVisual Pro &amp; Outdoor" class="device-label-img" data-v-10108b73=""><span class="device-label-title" data-v-10108b73="">AirVisual Pro &amp; Outdoor</span></div>No</td></tr></tbody></table></section></section><footer data-v-4ab60bba=""><nav class="footer-section" data-v-4ab60bba=""><ul class="footer-section-in" data-v-4ab60bba=""><li data-v-4ab60bba=""><a aria-current="page" href="/altruist-use-cases" class="router-link-active router-link-exact-active" data-v-4ab60bba="">Altruist use cases</a></li><li data-v-4ab60bba=""><a href="/altruist-timeline" class="" data-v-4ab60bba="">Altruist timeline</a></li><li data-v-4ab60bba=""><a href="/altruist-compare" class="" data-v-4ab60bba="">Altruist compare</a></li><li data-v-4ab60bba=""><a href="/air-measurements" class="" data-v-4ab60bba="">Measurements guide</a></li><li data-v-4ab60bba=""><a href="/privacy-policy" class="" data-v-4ab60bba="">Privacy policy</a></li></ul></nav><section class="footer-section separate" data-v-4ab60bba=""><div class="footer-section-in" data-v-4ab60bba=""><p data-v-4ab60bba="">Welcome to the decentralized opensource sensors map which operates with the sole intent of serving <a href="https://www.fsf.org/campaigns/priority-projects/decentralization-federation" target="_blank" rel="noopener" data-v-4ab60bba="">the free will of individuals</a> , without any beneficiaries. It offers two distinct layers of decentralization at your choise: peer-to-peer connectivity for direct access to sensor data, and the federative concept for accumulating sensor data and displaying measurement history. Click <a href="https://robonomics.academy/en/learn/sensors-connectivity-course/sensors-connectivity-module/" target="_blank" rel="noopener" data-v-4ab60bba="">here</a> for further technical details.</p><section data-v-49bc694b="" data-v-4ab60bba=""><p data-v-49bc694b=""><a href="https://github.com/airalab/sensors.robonomics.network" target="_blank" rel="noopener" data-v-49bc694b=""><b data-v-49bc694b="">airalab/sensors.social v4.0.3</b></a></p><div data-v-49bc694b=""><b data-v-49bc694b="">Secured by</b></div><img alt="" src="/assets/polkadot-new-dot-logo-horizontal.5c15bc80.svg" class="polkadotLogo" data-v-49bc694b=""></section></div></section></footer><div class="vue-notification-group" style="width: 300px; top: 0px; right: 0px;"><span></span></div></div>
+    
+  
+
+</body></html>
