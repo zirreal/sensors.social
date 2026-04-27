@@ -29,29 +29,25 @@
 
       <div v-if="showLogsHealthWarningBanner" class="logs-health-warning-banner">
         <div>
-          {{ $t("logs_health_unhealthy_period", { groups: unhealthyGroupsListDisplay }) }}
+          <span>{{
+            $t("logs_health_unhealthy_period", { groups: unhealthyGroupsListDisplay })
+          }}</span>
           <a href="#" @click.prevent="onLogsHealthDontShowWarningsForSensor">
             {{ t("Don't show any data warnings for this device") }}
           </a>
         </div>
 
-        <button 
-          type="button" 
-          class="button button-round-outline" 
-          @click="onLogsHealthShowDataAnyway">
+        <button
+          type="button"
+          class="button button-round-outline"
+          @click="onLogsHealthShowDataAnyway"
+        >
           <font-awesome-icon icon="fa-solid fa-xmark" />
         </button>
-        
       </div>
 
-      <Chart 
-        v-if="chartHasData" 
-        :log="log" 
-      />
-      <div
-        v-else-if="showNoDataMessage"
-        class="no-data-message"
-      >
+      <Chart v-if="chartHasData" :log="log" />
+      <div v-else-if="showNoDataMessage" class="no-data-message">
         {{ $t("No data available") }}
       </div>
       <div v-else-if="!chartHasData" class="chart-skeleton"></div>
@@ -112,8 +108,6 @@
         <template v-else>{{ t("notice_without_fz") }}</template>
       </p>
     </section>
-
-    
   </div>
 </template>
 
@@ -161,20 +155,17 @@ const unhealthyGroupLabels = computed(() => {
     { cat: "climate", labelKey: "Climate" },
     { cat: "noise", labelKey: "Noise" },
   ];
-  return rows
-    .filter(({ cat }) => lh[cat]?.healthy === false)
-    .map(({ labelKey }) => t(labelKey));
+  return rows.filter(({ cat }) => lh[cat]?.healthy === false).map(({ labelKey }) => t(labelKey));
 });
 
 const unhealthyGroupsListDisplay = computed(() => unhealthyGroupLabels.value.join(", "));
 
-const logsHealthSensorUserHide = computed(
-  () =>
-    Boolean(
-      logsHealthMeta.value?.userhide &&
+const logsHealthSensorUserHide = computed(() =>
+  Boolean(
+    logsHealthMeta.value?.userhide &&
       logsHealthMeta.value?.sensorId != null &&
       String(logsHealthMeta.value.sensorId) === String(props.point?.sensor_id)
-    )
+  )
 );
 
 const logsHealthReloadContext = () => ({
@@ -225,11 +216,7 @@ const showLogsHealthWarningBanner = computed(
 
 /** Только глобальный userhide по сенсору (record.userhide). Ссылка по-прежнему снимает все userhide (дни + корень). */
 const showLogsHealthUserhideNotice = computed(
-  () =>
-    runLogsHealth.value &&
-    hasLogs.value &&
-    chartHasData.value &&
-    logsHealthSensorUserHide.value
+  () => runLogsHealth.value && hasLogs.value && chartHasData.value && logsHealthSensorUserHide.value
 );
 
 const showNoDataMessage = computed(() => {
@@ -332,7 +319,6 @@ watch(
   },
   { immediate: true }
 );
-
 </script>
 
 <style scoped>
@@ -436,17 +422,30 @@ watch(
   grid-template-columns: auto auto;
   gap: var(--gap);
   align-items: start;
+  justify-content: space-between;
 }
 
 .logs-health-warning-banner .button-round-outline {
   background-color: transparent;
 }
 
+.logs-health-warning-banner > div {
+  display: flex;
+  flex-direction: column;
+  gap: calc(var(--gap) * 0.8);
+}
+
 .logs-health-warning-banner a {
+  align-self: flex-start;
   text-decoration: none;
   border-bottom: 1px dashed var(--color-red);
   color: var(--color-red);
   font-weight: bold;
+}
+
+.logs-health-warning-banner button {
+  width: calc(var(--app-inputheight) * 0.8);
+  height: calc(var(--app-inputheight) * 0.8);
 }
 
 .logs-health-userhide-notice {

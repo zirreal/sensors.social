@@ -87,14 +87,23 @@ const saveCache = (cache) => {
 const extractTranslationKeys = async () => {
   const files = await fg(PROJECT_FILES_GLOB);
   // Match both $t(...) and t(...)
-  const regex = /(?:\$)?t\(\s*["'`]([^"'`\s][^"'`]*?)["'`]\s*\)/g;
+  // Important: allow apostrophes inside double-quoted keys, etc.
+  // Capture the quote type and match until the SAME quote.
+  // Examples matched:
+  // - $t("Don't show…")
+  // - t('He said "hi"')
+  // - t(`Template literal key`)
+  const regex = /(?:\$)?t\(\s*(["'`])([\s\S]*?)\1\s*[,)]/g;
   const keys = new Set();
 
   for (const file of files) {
     const content = fs.readFileSync(file, "utf-8");
+    // IMPORTANT: reset `lastIndex` when reusing global regex across strings
+    regex.lastIndex = 0;
     let match;
     while ((match = regex.exec(content))) {
-      keys.add(match[1]);
+      const key = match[2];
+      if (typeof key === "string" && key.trim()) keys.add(key);
     }
   }
 

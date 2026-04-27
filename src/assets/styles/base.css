@@ -112,6 +112,7 @@ hr {
 
 input,
 select,
+textarea,
 .button {
   background-color: var(--app-inputbg);
   border-radius: var(--app-inputbradius);
@@ -121,7 +122,7 @@ select,
   font-family: var(--font-family--normal);
   font-size: var(--font-size);
   font-weight: 700;
-  line-height: 1;
+  line-height: 1.2;
   padding: calc(var(--app-inputpadding) * 0.8) var(--app-inputpadding);
   transition-duration: 0.33s;
   transition-property: border, background-color;
@@ -129,13 +130,19 @@ select,
   text-decoration: none;
 }
 
-input,
-select {
+input {
   height: 40px;
+}
+
+/* Select text can get vertically clipped on some platforms when height is fixed */
+select {
+  height: auto;
+  min-height: 40px;
 }
 
 input.block,
 select.block,
+textarea.block,
 .button.block {
   display: block;
   width: 100%;
@@ -166,8 +173,16 @@ select.select-link {
 }
 
 input[type="text"]:focus,
-input[type="password"]:focus {
+input[type="password"]:focus,
+input[type="email"]:focus,
+textarea:focus,
+select:focus {
   --app-bordercolor: var(--color-navy);
+}
+
+textarea {
+  min-height: 7rem;
+  resize: none;
 }
 
 input[type="checkbox"] {

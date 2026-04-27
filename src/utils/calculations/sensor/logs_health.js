@@ -202,6 +202,46 @@ export function checkAlwaysZeroPM25(pm25Values) {
   return zeroCount / totalCount >= THRESHOLD;
 }
 
+/**
+ * Проверяет, что шум (avg/max) почти всегда = 0 (канал "залип" на нуле / сломан).
+ * В отличие от PM, для шума постоянный ноль практически не реалистичен.
+ * @param {Array} logArr - массив логов
+ * @returns {boolean}
+ */
+export function checkAlwaysZeroNoise(logArr) {
+  const MIN_POINTS = 24; // примерно сутки почасовых / чаще данных
+  const THRESHOLD = 0.95; // 95%+ нулей
+  if (!Array.isArray(logArr) || logArr.length < MIN_POINTS) return false;
+
+  // Берём длинное окно, чтобы не ловить короткие "тихие" отрезки
+  const now = Math.max(...logArr.map((d) => Number(d?.timestamp) || 0));
+  if (!Number.isFinite(now) || now <= 0) return false;
+  const windowSeconds = 24 * 3600;
+  const windowLogs = logArr.filter((d) => now - Number(d?.timestamp) <= windowSeconds);
+  if (windowLogs.length < MIN_POINTS) return false;
+
+  let total = 0;
+  let zeros = 0;
+  let nonZero = 0;
+
+  for (const log of windowLogs) {
+    const a = log?.data?.noiseavg;
+    const b = log?.data?.noisemax;
+    // Используем любое доступное значение, предпочитая avg.
+    const vRaw = a ?? b;
+    const v = Number(vRaw);
+    if (!Number.isFinite(v)) continue;
+    total++;
+    if (v === 0) zeros++;
+    else if (v > 0) nonZero++;
+  }
+
+  if (total < MIN_POINTS) return false;
+  // Если есть хотя бы несколько ненулевых значений — это не "залипание на нуле"
+  if (nonZero >= 2) return false;
+  return zeros / total >= THRESHOLD;
+}
+
 
 /**
  * Проверяет стабильность PM за последние 5 часов
@@ -580,6 +620,7 @@ export function checkNoiseStability(logArr) {
     tooLow: checkNoiseTooLow(logArr),
     noChange: checkNoiseNoChange(logArr),
     longFlatline80: checkNoiseLongFlatline80(logArr),
+    alwaysZero: checkAlwaysZeroNoise(logArr),
   };
 }
 
@@ -683,6 +724,7 @@ const HEALTHY_DAY_EMPTY_BY_CATEGORY = {
     longFlatline80: false,
     noChange: false,
     tooLow: false,
+    alwaysZero: false,
   },
   pm: {
     isHealthy: true,

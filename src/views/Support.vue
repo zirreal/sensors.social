@@ -2,7 +2,7 @@
   <MetaInfo pageTitle="Support — sensors.social" />
   <PageTextLayout>
     <div class="pagetext-prose">
-      <header class="pagetext-header">
+      <section class="pagetext-header">
         <div class="pagetext-eyebrow">sensors.social</div>
         <h1 class="pagetext-title">{{ $t("Support") }}</h1>
         <p class="pagetext-subtitle">
@@ -12,7 +12,7 @@
             )
           }}
         </p>
-      </header>
+      </section>
 
       <section class="support-grid">
         <form ref="form" class="ui-surface support-card" @submit.prevent="onSubmit">
@@ -23,19 +23,12 @@
             @verify="onVerify"
             @error="onCaptchaError"
           />
-          <div class="support-card__header">
-            <div class="support-card__badge">{{ $t("Support") }}</div>
-            <h2 class="support-card__title">{{ $t("Write to us") }}</h2>
-            <p class="support-card__hint">
-              {{ $t("If it’s a bug, include steps + what you expected.") }}
-            </p>
-          </div>
 
           <label class="field">
             <span class="field-label">Email</span>
             <input
               v-model.trim="email"
-              class="block cute-input"
+              class="block"
               type="email"
               autocomplete="email"
               inputmode="email"
@@ -48,14 +41,40 @@
           </label>
 
           <label class="field">
+            <span class="field-label">{{ $t("Topic") }}</span>
+            <select
+              v-model="topic"
+              class="block"
+              :disabled="isSubmitting"
+              required
+              data-gsp-name="Topic"
+              :data-gsp-data="topic"
+            >
+              <option value="Altruist Sensor Support">
+                {{ $t("Altruist Sensor Support") }}
+              </option>
+              <option value="Map Questions & Feedback">
+                {{ $t("Map Questions & Feedback") }}
+              </option>
+              <option value="Other">{{ $t("Other") }}</option>
+            </select>
+          </label>
+
+          <label class="field">
             <div class="field-head">
               <span class="field-label">{{ $t("Comment") }}</span>
             </div>
             <textarea
               v-model.trim="comment"
-              class="block cute-input support-textarea"
+              class="block"
               rows="6"
-              placeholder="What can we help with? Feel free to paste logs, links, or screenshots descriptions."
+              :placeholder="
+                topic === 'Altruist Sensor Support'
+                  ? $t('support.placeholder.altruist')
+                  : topic === 'Map Questions & Feedback'
+                    ? $t('support.placeholder.map')
+                    : $t('support.placeholder.other')
+              "
               :disabled="isSubmitting"
               required
               data-gsp-name="Comment"
@@ -94,6 +113,7 @@ import MetaInfo from "../components/MetaInfo.vue";
 import PageTextLayout from "../components/layouts/PageText.vue";
 
 const email = ref("");
+const topic = ref("Altruist Sensor Support");
 const comment = ref("");
 const isSubmitting = ref(false);
 const status = ref("init"); // init | process | ok | error | na
@@ -244,87 +264,10 @@ async function onVerify(token) {
   margin: 0 auto;
 }
 
-.support-card__header {
-  text-align: left;
-  margin-bottom: calc(var(--gap) * 1);
-}
-
-.support-card__badge {
-  display: inline-flex;
-  align-items: center;
-  gap: calc(var(--gap) * 0.4);
-  font-weight: 900;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
-  font-size: calc(var(--font-size) * 0.85);
-  color: color-mix(in srgb, var(--app-textcolor), transparent 35%);
-  margin-bottom: calc(var(--gap) * 0.4);
-}
-
-.support-card__title {
-  margin: 0 0 calc(var(--gap) * 0.35);
-  font-size: calc(var(--font-size) * 1.6);
-}
-
-.support-card__hint {
-  margin: 0;
-  color: color-mix(in srgb, var(--app-textcolor), transparent 35%);
-}
-
 .field {
   display: grid;
   gap: calc(var(--gap) * 0.5);
   margin-top: calc(var(--gap) * 1);
-}
-
-.cute-input {
-  border-color: color-mix(in srgb, var(--app-bordercolor), transparent 55%);
-  border-radius: 18px;
-  padding: 1.15rem 1.15rem;
-  min-height: 54px;
-  background: color-mix(in srgb, var(--app-inputbg), var(--color-light-gray) 18%);
-  box-shadow: 0 10px 26px rgba(0, 0, 0, 0.06);
-  transition: border-color 160ms ease, box-shadow 180ms ease, background-color 160ms ease;
-  caret-color: var(--color-blue);
-}
-
-.cute-input::placeholder {
-  color: color-mix(in srgb, var(--app-inputtextcolor), transparent 55%);
-  font-weight: 700;
-}
-
-.cute-input:focus {
-  outline: none;
-  border-color: color-mix(in srgb, var(--color-blue), transparent 25%);
-  box-shadow: 0 0 0 4px color-mix(in srgb, var(--color-blue) 18%, transparent),
-    0 14px 34px rgba(0, 0, 0, 0.08);
-  background: color-mix(in srgb, var(--app-inputbg), var(--color-light-gray) 10%);
-}
-
-.field-head {
-  display: flex;
-  align-items: baseline;
-  justify-content: space-between;
-  gap: calc(var(--gap) * 0.5);
-}
-
-.field-label {
-  font-weight: 800;
-}
-
-.field-meta {
-  opacity: 0.6;
-  font-weight: 700;
-  font-size: calc(var(--font-size) * 0.95);
-}
-
-.support-textarea {
-  color: var(--app-inputtextcolor);
-  font: inherit;
-  font-weight: 700;
-  line-height: 1.55;
-  resize: vertical;
-  min-height: 11rem;
 }
 
 .support-actions {
