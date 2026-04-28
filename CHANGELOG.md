@@ -17,15 +17,19 @@ v4.0.4
 - Feat: Add auto-translation script for Markdown posts (`npm run autotranslate:md`)
 - UX: Improve blog layout, tags, cover rendering, and external links behavior
 
-**Where to buy page**
+**New pages**
 
-- Added new page
+- Added Where to buy page + Support page
 
 **Styles / Layout:**
 
 - Refactor: unify all text pages to a shared header pattern (`pagetext-header`, `pagetext-title`, `pagetext-subtitle`)
 - Refactor: consolidate prose, table and code-block styles into `src/assets/styles/layout.css` (remove per-page duplicates)
 - UX: hide horizontal scrollbars for small-screen tables while keeping swipe scrolling
+
+**Bug fixes**
+
+- Fixed db cache issues
 
 v4.0.3
 
