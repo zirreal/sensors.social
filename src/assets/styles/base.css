@@ -500,12 +500,6 @@ section:not(:last-child) {
   transition: color 0.33s ease-in-out, background-color 0.33s ease-in-out;
 }
 
-@media (prefers-color-scheme: dark) {
-  .text-changabletheme {
-    color: var(--color-light);
-  }
-}
-
 .text-small {
   font-size: 0.8em;
 }

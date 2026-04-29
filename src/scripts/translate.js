@@ -27,7 +27,14 @@ const loadLanguagesFromIndex = async () => {
 // CONFIG
 const LANGUAGES_FALLBACK = ["en", "ru"];
 const SKIP_KEYS = ["details.nativeShareNotAvailable"]; // Add keys to skip here
+const PRUNE_UNUSED_KEYS = true; // Remove unused keys, but keep explicit dynamic/legacy keys
 const PRESERVE_KEYS = [
+  "history.currentDay",
+  "history.currentMonth",
+  "history.chooseDates",
+  "logs_health_unhealthy_period",
+  "logs_health_device_hid_warnings",
+  "logs_health_show_warnings_for_period",
   "Climate",
   "Daily Recap",
   "Realtime",
@@ -167,13 +174,15 @@ const run = async () => {
     const translationsRaw = await loadLocaleFile(lang);
     const translations = flatten(translationsRaw);
 
-    // Remove unused keys
-    const cleanTranslations = {};
-    for (const tKey in translations) {
-      if (keys.includes(tKey) || PRESERVE_KEYS.includes(tKey)) {
-        cleanTranslations[tKey] = translations[tKey];
-      } else {
-        console.log(`🗑️ Removing unused key [${lang}]: ${tKey}`);
+    // Keep existing keys by default, including legacy keys that may not be detected
+    // by static extraction (dynamic usage, compatibility aliases, etc.).
+    const cleanTranslations = { ...translations };
+    if (PRUNE_UNUSED_KEYS) {
+      for (const tKey in translations) {
+        if (!keys.includes(tKey) && !PRESERVE_KEYS.includes(tKey)) {
+          delete cleanTranslations[tKey];
+          console.log(`🗑️ Removing unused key [${lang}]: ${tKey}`);
+        }
       }
     }
 
@@ -221,7 +230,13 @@ const run = async () => {
         continue;
       }
 
-      if (looksLikeCodeIdentifier(key) && !looksLikeUserText(key) && !SHORT_LIST.includes(key)) {
+      const hasUnderscoreWordSeparator = key.includes("_");
+      if (
+        looksLikeCodeIdentifier(key) &&
+        !looksLikeUserText(key) &&
+        !SHORT_LIST.includes(key) &&
+        !hasUnderscoreWordSeparator
+      ) {
         console.log(`⏭️ Skipping key (looks like code identifier): ${key}`);
         continue;
       }

@@ -72,11 +72,11 @@ const shops = computed(() => [
     logo: pinoutLogo,
     logoAlt: "Pinout",
     title: "Pinout",
-    description: t("Altruist Air Quality Sensors with Installation & Setup on Cyprus"),
+    description: t("Altruist Air Quality Sensors with Installation & Setup in Cyprus"),
   },
   {
     id: "ru_cis",
-    regionLabel: t("RU & CIS"),
+    regionLabel: t("EAEU"),
     comingSoon: false,
     tone: "primary",
     href: "https://market.yandex.ru/search?generalContext=t%3Dmerchant%3Bi%3D1%3Bmrch%3D216593109%3B&rs=eJwzEvjEyMvBKLDwEKsEg0bTnOfsACoUBRA%2C&merchant-filter=216593109",
@@ -117,9 +117,6 @@ const shops = computed(() => [
   align-items: stretch;
   gap: calc(var(--gap) * 1.2);
   margin-top: calc(var(--gap) * 1.2);
-}
-.shops > a {
-  background-color: #fff;
 }
 
 .shop {

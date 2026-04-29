@@ -80,19 +80,3 @@
     margin-bottom: 0;
   }
 }
-
-@media (prefers-color-scheme: dark) {
-  :root {
-    --app-bodybg: #1b1b1b;
-    --app-textcolor: #fff;
-    /* --app-bordercolor: var(--color-gray); */
-    --app-tablerow: hsl(220, 23%, 18%);
-    --app-tableborder: #ddd;
-    --app-controlsgap: calc(var(--gap) * 0.5);
-    --app-buttoncolor: hsl(219, 100%, 60%);
-    --app-buttoncolor-hover: hsl(219, 100%, 50%);
-    /* --color-light-gray: #6d6d6d; */
-    --color-green-bright: hsl(83, 64%, 29%);
-    --color-bright-green-dim: hsla(83, 64%, 29%, 0.55);
-  }
-}

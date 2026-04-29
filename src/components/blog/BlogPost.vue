@@ -355,13 +355,6 @@ p.blog-post__meta {
   pointer-events: none;
 }
 
-@media (prefers-color-scheme: dark) {
-  .blog-post__abstract {
-    background: radial-gradient(800px 220px at 10% 10%, rgba(255, 255, 255, 0.06), transparent 60%),
-      rgba(255, 255, 255, 0.03);
-  }
-}
-
 .blog-post__content {
   /* text-all typography is shared in `src/assets/styles/layout.css` */
   max-width: 76ch;
