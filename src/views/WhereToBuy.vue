@@ -118,6 +118,9 @@ const shops = computed(() => [
   gap: calc(var(--gap) * 1.2);
   margin-top: calc(var(--gap) * 1.2);
 }
+.shops > a {
+  background-color: #fff;
+}
 
 .shop {
   --shop-accent: var(--color-link);
@@ -248,7 +251,6 @@ const shops = computed(() => [
   display: grid;
   place-items: center;
   padding: calc(var(--gap) * 0.5);
-  background: color-mix(in srgb, var(--app-bodybg), transparent 0%);
   min-height: 140px;
 }
 

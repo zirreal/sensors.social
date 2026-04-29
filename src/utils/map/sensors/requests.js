@@ -343,7 +343,7 @@ async function getCachedData(sensorId, dates) {
   try {
     const now = Date.now();
     const TTL = 24 * 60 * 60 * 1000; // 24 часа
-    const cachedData = { data: {}, address: null };
+    const cachedData = { data: {}, address: null, lastUpdated: 0 };
 
     // Получаем данные сенсора из кэша
     const sensorKey = sensorId;
@@ -365,6 +365,7 @@ async function getCachedData(sensorId, dates) {
 
             // Сохраняем адрес из кэша
             cachedData.address = sensorData.address || null;
+            cachedData.lastUpdated = Number(sensorData.lastUpdated || 0);
           }
 
           resolve(cachedData);
@@ -377,7 +378,7 @@ async function getCachedData(sensorId, dates) {
     });
   } catch (error) {
     console.error("Error getting cached data:", error);
-    return { data: {}, address: null };
+    return { data: {}, address: null, lastUpdated: 0 };
   }
 }
 
@@ -669,9 +670,29 @@ export async function getSensorDataWithCache(
     // Определяем текущий день
     const today = new Date().toISOString().split("T")[0];
 
+    // Если в кэшированном массиве логов последний timestamp заметно раньше конца дня, то принудительно обновляем этот день (кроме today).
+    const isLikelyIncompleteDayCache = (day) => {
+      if (!day || day === today) return false;
+      const dayArr = cachedData?.[day];
+      if (!Array.isArray(dayArr) || dayArr.length < 2) return false;
+
+      let maxTs = 0;
+      for (const item of dayArr) {
+        const ts = Number(item?.timestamp || 0);
+        if (Number.isFinite(ts) && ts > maxTs) maxTs = ts;
+      }
+      if (!maxTs) return false;
+
+      const { end: dayEndSec } = dayBoundsUnix(day);
+      // 10 минут буфер: не считаем день "обрезанным" если данные почти до конца дня
+      return maxTs < Number(dayEndSec) - 10 * 60;
+    };
+
     // Определяем какие дни нужно загрузить
     // Для текущего дня всегда загружаем данные принудительно (чтобы получать актуальные данные)
-    const missingDays = neededDays.filter((day) => !cachedData[day] || day === today);
+    const missingDays = neededDays.filter(
+      (day) => !cachedData[day] || day === today || isLikelyIncompleteDayCache(day)
+    );
 
     const totalDays = neededDays.length;
     const cachedDays = totalDays - missingDays.length;

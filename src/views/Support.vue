@@ -16,7 +16,7 @@
 
       <section class="support-grid">
         <form ref="form" class="ui-surface support-card" @submit.prevent="onSubmit">
-          <VueHcaptcha
+          <vue-hcaptcha
             ref="invisibleHcaptcha"
             :sitekey="siteKey"
             size="invisible"
@@ -72,8 +72,8 @@
                 topic === 'Altruist Sensor Support'
                   ? $t('support.placeholder.altruist')
                   : topic === 'Map Questions & Feedback'
-                    ? $t('support.placeholder.map')
-                    : $t('support.placeholder.other')
+                  ? $t('support.placeholder.map')
+                  : $t('support.placeholder.other')
               "
               :disabled="isSubmitting"
               required
