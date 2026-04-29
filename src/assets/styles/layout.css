@@ -6,8 +6,7 @@
   padding: calc(var(--gap) * 5) calc(var(--gap) * 3) calc(var(--gap) * 3);
 }
 
-.container-pagetext
-  > :not(.blog-post):not(.pagetext-wide-1920):not(.pagetext-header) {
+.container-pagetext > :not(.blog-post):not(.pagetext-wide-1920):not(.pagetext-header) {
   margin: 0 auto;
   max-width: 1200px;
 }
@@ -334,13 +333,6 @@
   .pagetext-table-scroll::-webkit-scrollbar,
   .pagetext-pre-scroll::-webkit-scrollbar {
     height: 0;
-  }
-}
-
-@media (prefers-color-scheme: dark) {
-  .text-all code,
-  .pagetext-prose code {
-    background: rgba(255, 255, 255, 0.08);
   }
 }
 

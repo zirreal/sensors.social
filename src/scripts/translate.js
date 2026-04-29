@@ -27,7 +27,14 @@ const loadLanguagesFromIndex = async () => {
 // CONFIG
 const LANGUAGES_FALLBACK = ["en", "ru"];
 const SKIP_KEYS = ["details.nativeShareNotAvailable"]; // Add keys to skip here
+const PRUNE_UNUSED_KEYS = true; // Remove unused keys, but keep explicit dynamic/legacy keys
 const PRESERVE_KEYS = [
+  "history.currentDay",
+  "history.currentMonth",
+  "history.chooseDates",
+  "logs_health_unhealthy_period",
+  "logs_health_device_hid_warnings",
+  "logs_health_show_warnings_for_period",
   "Climate",
   "Daily Recap",
   "Realtime",
@@ -57,6 +64,7 @@ const PRESERVE_KEYS = [
 const TRANSLATION_FILES_DIR = "src/translate";
 const CACHE_FILE = "src/scripts/openai-cache.json";
 const PROJECT_FILES_GLOB = ["src/**/*.vue", "src/**/*.js"];
+const PROJECT_FILES_IGNORE = ["src/translate/**", "src/scripts/**"];
 
 // Flatten nested object to flat keys with dots
 const flatten = (obj, prefix = "") => {
@@ -85,7 +93,7 @@ const saveCache = (cache) => {
 
 // Extract translation keys
 const extractTranslationKeys = async () => {
-  const files = await fg(PROJECT_FILES_GLOB);
+  const files = await fg(PROJECT_FILES_GLOB, { ignore: PROJECT_FILES_IGNORE });
   // Match both $t(...) and t(...)
   // Important: allow apostrophes inside double-quoted keys, etc.
   // Capture the quote type and match until the SAME quote.
@@ -93,7 +101,7 @@ const extractTranslationKeys = async () => {
   // - $t("Don't show…")
   // - t('He said "hi"')
   // - t(`Template literal key`)
-  const regex = /(?:\$)?t\(\s*(["'`])([\s\S]*?)\1\s*[,)]/g;
+  const regex = /(?<![\w$])(?:\$t|t)\(\s*(["'`])([\s\S]*?)\1\s*[,)]/g;
   const keys = new Set();
 
   for (const file of files) {
@@ -155,6 +163,7 @@ const run = async () => {
   const LANGUAGES = (await loadLanguagesFromIndex()) || LANGUAGES_FALLBACK;
   const keys = await extractTranslationKeys();
   const cache = loadCache();
+  const INVALID_LITERAL_KEYS = new Set(["\\n", "\\r", "\\t", '"', "'", "`"]);
 
   const isSimpleNestedKey = (key) => /^[\w\d_.-]+$/.test(key);
   const looksLikeCodeIdentifier = (key) => /^[a-zA-Z_][a-zA-Z0-9_]*$/.test(key);
@@ -167,13 +176,20 @@ const run = async () => {
     const translationsRaw = await loadLocaleFile(lang);
     const translations = flatten(translationsRaw);
 
-    // Remove unused keys
-    const cleanTranslations = {};
-    for (const tKey in translations) {
-      if (keys.includes(tKey) || PRESERVE_KEYS.includes(tKey)) {
-        cleanTranslations[tKey] = translations[tKey];
-      } else {
-        console.log(`🗑️ Removing unused key [${lang}]: ${tKey}`);
+    // Keep existing keys by default, including legacy keys that may not be detected
+    // by static extraction (dynamic usage, compatibility aliases, etc.).
+    const cleanTranslations = { ...translations };
+    if (PRUNE_UNUSED_KEYS) {
+      for (const tKey in translations) {
+        if (INVALID_LITERAL_KEYS.has(tKey)) {
+          delete cleanTranslations[tKey];
+          console.log(`🗑️ Removing invalid key [${lang}]: ${tKey}`);
+          continue;
+        }
+        if (!keys.includes(tKey) && !PRESERVE_KEYS.includes(tKey)) {
+          delete cleanTranslations[tKey];
+          console.log(`🗑️ Removing unused key [${lang}]: ${tKey}`);
+        }
       }
     }
 
@@ -204,6 +220,11 @@ const run = async () => {
         continue;
       }
 
+      if (INVALID_LITERAL_KEYS.has(key)) {
+        console.log(`⏭️ Skipping key (invalid literal): ${key}`);
+        continue;
+      }
+
       if (/^[,.:;#\s]+$/.test(key)) {
         console.log(`⏭️ Skipping key (only punctuation): ${key}`);
         continue;
@@ -214,14 +235,26 @@ const run = async () => {
         continue;
       }
 
+      if (/[\r\n]/.test(key)) {
+        console.log(`⏭️ Skipping key (contains line breaks): ${key}`);
+        continue;
+      }
+
       const hasTemplateVariable = /\$\{[^}]+\}/;
       const looksLikePath = /^\/|\/.*\//;
-      if (hasTemplateVariable.test(key) || looksLikePath.test(key)) {
+      const looksLikeModulePath = /^[@~.]?\/?[\w-]+(?:\/[\w.-]+)+$/;
+      if (hasTemplateVariable.test(key) || looksLikePath.test(key) || looksLikeModulePath.test(key)) {
         console.log(`⏭️ Skipping key (looks like path/template variable): ${key}`);
         continue;
       }
 
-      if (looksLikeCodeIdentifier(key) && !looksLikeUserText(key) && !SHORT_LIST.includes(key)) {
+      const hasUnderscoreWordSeparator = key.includes("_");
+      if (
+        looksLikeCodeIdentifier(key) &&
+        !looksLikeUserText(key) &&
+        !SHORT_LIST.includes(key) &&
+        !hasUnderscoreWordSeparator
+      ) {
         console.log(`⏭️ Skipping key (looks like code identifier): ${key}`);
         continue;
       }

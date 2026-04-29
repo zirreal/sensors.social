@@ -237,14 +237,6 @@ console.log();
   justify-content: flex-end;
 }
 
-@media (prefers-color-scheme: dark) {
-  .blog-list__card {
-    --ui-surface-bg: color-mix(in srgb, var(--app-bodybg), transparent 10%);
-    --ui-surface-border: rgba(255, 255, 255, 0.16);
-    --ui-surface-border-hover: rgba(255, 255, 255, 0.26);
-  }
-}
-
 @media (prefers-reduced-motion: reduce) {
   .blog-list__card img {
     transition: none;
