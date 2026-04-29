@@ -64,6 +64,7 @@ const PRESERVE_KEYS = [
 const TRANSLATION_FILES_DIR = "src/translate";
 const CACHE_FILE = "src/scripts/openai-cache.json";
 const PROJECT_FILES_GLOB = ["src/**/*.vue", "src/**/*.js"];
+const PROJECT_FILES_IGNORE = ["src/translate/**", "src/scripts/**"];
 
 // Flatten nested object to flat keys with dots
 const flatten = (obj, prefix = "") => {
@@ -92,7 +93,7 @@ const saveCache = (cache) => {
 
 // Extract translation keys
 const extractTranslationKeys = async () => {
-  const files = await fg(PROJECT_FILES_GLOB);
+  const files = await fg(PROJECT_FILES_GLOB, { ignore: PROJECT_FILES_IGNORE });
   // Match both $t(...) and t(...)
   // Important: allow apostrophes inside double-quoted keys, etc.
   // Capture the quote type and match until the SAME quote.
@@ -100,7 +101,7 @@ const extractTranslationKeys = async () => {
   // - $t("Don't show…")
   // - t('He said "hi"')
   // - t(`Template literal key`)
-  const regex = /(?:\$)?t\(\s*(["'`])([\s\S]*?)\1\s*[,)]/g;
+  const regex = /(?<![\w$])(?:\$t|t)\(\s*(["'`])([\s\S]*?)\1\s*[,)]/g;
   const keys = new Set();
 
   for (const file of files) {
@@ -162,6 +163,7 @@ const run = async () => {
   const LANGUAGES = (await loadLanguagesFromIndex()) || LANGUAGES_FALLBACK;
   const keys = await extractTranslationKeys();
   const cache = loadCache();
+  const INVALID_LITERAL_KEYS = new Set(["\\n", "\\r", "\\t", '"', "'", "`"]);
 
   const isSimpleNestedKey = (key) => /^[\w\d_.-]+$/.test(key);
   const looksLikeCodeIdentifier = (key) => /^[a-zA-Z_][a-zA-Z0-9_]*$/.test(key);
@@ -179,6 +181,11 @@ const run = async () => {
     const cleanTranslations = { ...translations };
     if (PRUNE_UNUSED_KEYS) {
       for (const tKey in translations) {
+        if (INVALID_LITERAL_KEYS.has(tKey)) {
+          delete cleanTranslations[tKey];
+          console.log(`🗑️ Removing invalid key [${lang}]: ${tKey}`);
+          continue;
+        }
         if (!keys.includes(tKey) && !PRESERVE_KEYS.includes(tKey)) {
           delete cleanTranslations[tKey];
           console.log(`🗑️ Removing unused key [${lang}]: ${tKey}`);
@@ -213,6 +220,11 @@ const run = async () => {
         continue;
       }
 
+      if (INVALID_LITERAL_KEYS.has(key)) {
+        console.log(`⏭️ Skipping key (invalid literal): ${key}`);
+        continue;
+      }
+
       if (/^[,.:;#\s]+$/.test(key)) {
         console.log(`⏭️ Skipping key (only punctuation): ${key}`);
         continue;
@@ -223,9 +235,15 @@ const run = async () => {
         continue;
       }
 
+      if (/[\r\n]/.test(key)) {
+        console.log(`⏭️ Skipping key (contains line breaks): ${key}`);
+        continue;
+      }
+
       const hasTemplateVariable = /\$\{[^}]+\}/;
       const looksLikePath = /^\/|\/.*\//;
-      if (hasTemplateVariable.test(key) || looksLikePath.test(key)) {
+      const looksLikeModulePath = /^[@~.]?\/?[\w-]+(?:\/[\w.-]+)+$/;
+      if (hasTemplateVariable.test(key) || looksLikePath.test(key) || looksLikeModulePath.test(key)) {
         console.log(`⏭️ Skipping key (looks like path/template variable): ${key}`);
         continue;
       }
