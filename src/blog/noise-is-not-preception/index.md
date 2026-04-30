@@ -1,9 +1,9 @@
 ---
 title: "Noise is not perception: real measurements from Austria to Hong Kong with Altruist Urban"
 date: 2026-04-30
-published: false
+published: true
 locale: "en"
-cover_image: ./images/10.webp
+cover_image: ./images/cover.webp
 description: "Altruist Urban is a sensor designed to measure environmental parameters."
 abstract: "Is the noise around us really what we think it is? To find out, I took an Altruist Urban sensor and started measuring…"
 tags: []
@@ -32,7 +32,7 @@ Hollywood Vampires with Johnny Depp, Elton John, Alice Cooper, Sting, Bryan Adam
 
 And, as often happens, local residents began to complain about noise from the concerts and visitors, saying it disrupted the village’s nighttime peace. I decided to test this using real measurements and data, with an Altruist Urban sensor in hand.
 
-## Experiment: concert vs. village
+## 🎤 Experiment: concert vs. village
 
 ![Noise levels chart](./images/10.webp)
 
@@ -80,6 +80,8 @@ I observed how noise dynamics change — the peaks on the sensor graphs fully ma
 Interestingly, even Sting’s relatively calm genre showed higher peak values — noise levels reached up to **106 dB**.
 
 This is no longer just measurement — it’s a tool for analyzing concert acoustics in open-air venues.
+
+<InstagramEmbed url="https://www.instagram.com/reel/DXwxnRRggfq" />
 
 ![Zucchero vs Sting noise levels](./images/Zucchero_vs_Sting-3.webp)
 
@@ -139,6 +141,8 @@ This experiment breaks a common stereotype: even in the heart of a megacity, you
 
 ![Air quality and noise data](./images/3.webp)
 
+<InstagramEmbed url="https://www.instagram.com/reel/DXxK_P9AcIM"/>
+
 ### Practical application
 
 For the hospitality industry: you can showcase the acoustic comfort of your property and the air quality in relaxation areas to potential guests — especially in large cities.
@@ -155,6 +159,8 @@ It turned out that small birds can generate very high noise levels — almost li
 
 ![Noise dynamics graph](./images/6.webp)
 
+<InstagramEmbed url="https://www.instagram.com/reel/DXwQu5BgwLO" />
+
 ### Practical application
 
 For city services and public space management:
@@ -165,7 +171,7 @@ Deploying multiple sensors around noisy locations provides a more complete pictu
 
 ---
 
-## The most extreme noise test: Waterfall Party (Koh Phangan)
+## 🔥 The most extreme noise test: Waterfall Party (Koh Phangan)
 
 ![Waterfall party noise levels](./images/7.webp)
 
@@ -181,9 +187,9 @@ I measured noise levels across all four stages: Sky Stage, Main Stage, Secret St
 
 This shows that acoustics depend not only on scale, but also on placement and sound setup.
 
-<InstagramEmbed url="https://www.instagram.com/reel/DXwJ2THA0fE" />
-
 ![Waterfall party noise map](./images/waterfall-party.webp)
+
+<InstagramEmbed url="https://www.instagram.com/reel/DXwJ2THA0fE" />
 
 ### Practical application
 
@@ -227,4 +233,4 @@ We are used to perceiving the environment through feelings and impressions.
 
 But when you have data — you start to see the world differently.
 
-![sensors.social](./images/9.webp)
+[![sensors.social](./images/9.webp)](https://sensors.social/?type=noisemax&date=2025-07-06&provider=remote&lat=29.2289&lng=-5.5371&zoom=3)
