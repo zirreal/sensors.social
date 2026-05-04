@@ -15,9 +15,11 @@ import {
   saveAddressToCache,
   getCachedAddress,
   getSensorOwner,
+  getOwnerSensorsWithData,
+  preloadSensorMeta,
+  classifySensorTypeFromLogSamples,
 } from "../utils/map/sensors/requests";
-import { getAddress } from "../utils/utils";
-import { hasValidCoordinates } from "../utils/utils";
+import { getAddress, hasValidCoordinates } from "../utils/utils";
 import { dayISO, dayBoundsUnix, getPeriodBounds } from "@/utils/date";
 import { loadLogsHealth } from "../utils/calculations/sensor/logs_health.js";
 
@@ -76,16 +78,35 @@ const createDefaultLogsProgress = () => ({
 
 const logsProgress = ref(createDefaultLogsProgress());
 
+// Состояние попапа и защита от гонок при загрузке сенсоров/логов — на уровне модуля, чтобы все
+// вызовы useSensors() (Main, Index, Timeline, …) работали с одним и тем же sensorPoint и одними
+// и теми же in-flight запросами (abort / request id).
+const sensorPoint = ref(null);
+const recentlyClosed = ref({ id: null, until: 0 });
+const isUpdatingPopup = ref(false);
+const ownerPromises = new Map();
+let realtimeLogsLoadInFlight = false;
+// Переменные для предотвращения race conditions при загрузке сенсоров и логов
+let currentRequestId = null;
+let currentLogsRequestId = null;
+let currentLogsAbortController = null;
+
 export function useSensors(localeComputed) {
+  const localeRef =
+    localeComputed ??
+    computed(() => {
+      try {
+        return localStorage.getItem("locale") || "en";
+      } catch {
+        return "en";
+      }
+    });
+
   const mapState = useMap();
-  
+
   const { idbBookmarks } = useBookmarks();
   const router = useRouter();
   const route = useRoute();
-
-  // Локальное состояние компонента
-  const sensorPoint = ref(null);
-  const recentlyClosed = ref({ id: null, until: 0 });
 
   const isSensorNew = () => {
     const logs = sensorPoint.value?.logs || null;
@@ -125,14 +146,10 @@ export function useSensors(localeComputed) {
       mapState.currentProvider.value === "remote" &&
       !isSensorNew()
   );
-  
+
   const resetLogsProgress = () => {
     logsProgress.value = createDefaultLogsProgress();
   };
-  let realtimeLogsLoadInFlight = false;
-
-  const isUpdatingPopup = ref(false); // Флаг для предотвращения повторных вызовов updateSensorPopup
-  const ownerPromises = new Map();
 
   const ensureOwnerLoaded = (sensorId) => {
     if (!sensorId) return;
@@ -151,13 +168,20 @@ export function useSensors(localeComputed) {
     const promise = getSensorOwner(sensorId)
       .then((owner) => {
         if (owner) {
-          setSensorData(sensorId, { owner });
+          // Don't create a new map marker entry just to store owner for popup-only sensors.
+          const existsOnMap = sensors.value?.some((s) => s?.sensor_id === sensorId);
+          if (existsOnMap) {
+            setSensorData(sensorId, { owner });
+          }
           if (sensorPoint.value && sensorPoint.value.sensor_id === sensorId) {
             sensorPoint.value = {
               ...sensorPoint.value,
               owner,
             };
           }
+          // Add `owner=` to URL whenever we actually know it.
+          // This is independent of `sensor=` (we may open popup without sensor in URL).
+          mapState.setMapSettings(route, router, { owner });
         }
         return owner;
       })
@@ -174,7 +198,8 @@ export function useSensors(localeComputed) {
   };
 
   const isSensor = computed(() => {
-    return !!(route.query.sensor && sensorPoint.value && sensorPoint.value.sensor_id);
+    // Popup can be opened either via URL (`sensor=` deep link) or directly by marker click (no `sensor=`).
+    return !!(sensorPoint.value && sensorPoint.value.sensor_id);
   });
 
   /**
@@ -262,8 +287,12 @@ export function useSensors(localeComputed) {
         // Логи уже загружены для remote - не делаем повторный запрос
         resetLogsProgress();
         const cleanLogs = sanitizeSensorLogsPmSentinels(currentLogs);
-        sensorPoint.value = { ...sensorPoint.value, logs: cleanLogs };
-        setSensorData(sensorId, { logs: cleanLogs });
+        const ownerSensorsWithData = getOwnerSensorsWithData(sensorId);
+        sensorPoint.value = { ...sensorPoint.value, logs: cleanLogs, ownerSensorsWithData };
+        {
+          const existsOnMap = sensors.value?.some((s) => s?.sensor_id === sensorId);
+          if (existsOnMap) setSensorData(sensorId, { logs: cleanLogs });
+        }
         if (runLogsHealth.value) {
           void loadLogsHealth(sensorId, cleanLogs, {
             currentDate: mapState.currentDate.value,
@@ -374,12 +403,18 @@ export function useSensors(localeComputed) {
       } else if (Array.isArray(logArray)) {
         // Данные загружены (даже если пустой массив); -1 в PM = «нет данных»
         const cleanLogs = sanitizeSensorLogsPmSentinels(logArray);
-        sensorPoint.value = { ...sensorPoint.value, logs: cleanLogs };
+        const ownerSensorsWithData = getOwnerSensorsWithData(sensorId);
+        sensorPoint.value = { ...sensorPoint.value, logs: cleanLogs, ownerSensorsWithData };
 
         // Сохраняем логи
-        setSensorData(sensorId, {
-          logs: cleanLogs,
-        });
+        {
+          const existsOnMap = sensors.value?.some((s) => s?.sensor_id === sensorId);
+          if (existsOnMap) {
+            setSensorData(sensorId, {
+              logs: cleanLogs,
+            });
+          }
+        }
 
         if (runLogsHealth.value) {
           void loadLogsHealth(sensorId, cleanLogs, {
@@ -434,7 +469,7 @@ export function useSensors(localeComputed) {
    * @param {Object} [point.data] - Текущие данные
    * @throws {Error} При ошибке сбрасывает состояние попапа
    */
-  const updateSensorPopup = (point) => {
+  const updateSensorPopup = (point, options = {}) => {
     // Защита от повторных вызовов
     if (isUpdatingPopup.value) {
       return;
@@ -455,7 +490,13 @@ export function useSensors(localeComputed) {
 
     // If URL no longer points to this sensor (e.g. popup was closed),
     // don't reopen it from stale async updates.
-    if (route.query.sensor !== point.sensor_id) {
+    // Map marker clicks pass `fromMapClick: true` so a stale `sensor=` in URL
+    // (e.g. after switching device in select) does not block opening the clicked marker.
+    if (
+      !options.fromMapClick &&
+      route.query.sensor &&
+      route.query.sensor !== point.sensor_id
+    ) {
       return;
     }
 
@@ -480,7 +521,7 @@ export function useSensors(localeComputed) {
             sensorPoint.value.address = cachedAddress;
           } else {
             // Если в кэше нет, получаем из API
-            getAddress(point.geo.lat, point.geo.lng, localeComputed.value).then((address) => {
+            getAddress(point.geo.lat, point.geo.lng, localeRef.value).then((address) => {
               if (sensorPoint.value && sensorPoint.value.sensor_id === point.sensor_id && address) {
                 sensorPoint.value.address = address;
                 // Сохраняем адрес в кэш
@@ -537,15 +578,43 @@ export function useSensors(localeComputed) {
           zoom: point.zoom,
         });
 
-        // sensors
-        setSensorData(point.sensor_id, {
-          geo: point.geo,
-          zoom: point.zoom,
-          address: point.address,
-        });
+        // sensors:
+        // Don't create a new marker entry for "owner dropdown" sensors that aren't part of the map points list.
+        // Otherwise switching to a related sensor can create an extra marker.
+        const existsOnMap = sensors.value?.some((s) => s?.sensor_id === point.sensor_id);
+        if (existsOnMap) {
+          setSensorData(point.sensor_id, {
+            geo: point.geo,
+            zoom: point.zoom,
+            address: point.address,
+          });
+        }
 
         // Устанавливаем активный маркер и двигаем карту
         setActiveMarker(point.sensor_id);
+      }
+
+      // Preload v2 meta so owner dropdown can render early (daily recap).
+      if (sensorPoint.value?.sensor_id) {
+        const sid = sensorPoint.value.sensor_id;
+        const timelineMode = mapState.timelineMode.value || "day";
+        let start = 0;
+        let end = 0;
+        if (timelineMode === "day") {
+          const bounds = dayBoundsUnix(mapState.currentDate.value);
+          start = bounds.start;
+          end = bounds.end;
+        } else {
+          const bounds = getPeriodBounds(mapState.currentDate.value, timelineMode);
+          start = bounds.start;
+          end = bounds.end;
+        }
+
+        preloadSensorMeta(sid, start, end).then(() => {
+          if (!isSensorOpen(sid)) return;
+          const ownerSensorsWithData = getOwnerSensorsWithData(sid);
+          sensorPoint.value = { ...sensorPoint.value, ownerSensorsWithData };
+        });
       }
 
       // Обновляем логи асинхронно для быстрого открытия попапа
@@ -737,9 +806,10 @@ export function useSensors(localeComputed) {
     // Очищаем активный маркер (также сбрасывает активную область карты)
     clearActiveMarker();
 
-    // Убираем sensor из URL при закрытии попапа
+    // Убираем sensor и owner из URL при закрытии попапа
     const currentQuery = { ...route.query };
     delete currentQuery.sensor;
+    delete currentQuery.owner;
 
     // If we navigated to a historical date via a Story, reset date back to today on close
     try {
@@ -755,11 +825,6 @@ export function useSensors(localeComputed) {
 
     sensorsUtils.refreshClusters();
   };
-
-  // Переменные для предотвращения race conditions при загрузке сенсоров и логов
-  let currentRequestId = null;
-  let currentLogsRequestId = null;
-  let currentLogsAbortController = null;
 
   /**
    * Обновляет maxdata для существующих сенсоров при смене currentUnit
@@ -933,40 +998,6 @@ export function useSensors(localeComputed) {
   };
 
   /**
-   * Проверяет наличие co2 в данных лога
-   * @param {Object} logItem - Элемент лога
-   * @returns {boolean} true если есть co2
-   */
-  const hasCo2InLog = (logItem) => {
-    return hasValue(logItem?.data?.co2);
-  };
-
-  /**
-   * Проверяет наличие шума (noiseavg или noisemax) в данных лога
-   * @param {Object} logItem - Элемент лога
-   * @returns {boolean} true если есть шум
-   */
-  const hasNoiseInLog = (logItem) => {
-    return hasValue(logItem?.data?.noiseavg) || hasValue(logItem?.data?.noisemax);
-  };
-
-  /**
-   * Определяет наличие co2 и шума в массиве логов
-   * @param {Array} logs - Массив логов
-   * @returns {Object} Объект с hasCo2 и hasNoise
-   */
-  const checkLogsData = (logs) => {
-    if (!Array.isArray(logs) || logs.length === 0) {
-      return { hasCo2: false, hasNoise: false };
-    }
-
-    return {
-      hasCo2: logs.some(hasCo2InLog),
-      hasNoise: logs.some(hasNoiseInLog),
-    };
-  };
-
-  /**
    * Определяет наличие co2 и шума в текущих данных (для realtime)
    * @param {Object} data - Текущие данные сенсора
    * @returns {Object} Объект с hasCo2 и hasNoise
@@ -995,20 +1026,17 @@ export function useSensors(localeComputed) {
       return "diy";
     }
 
-    // Проверяем логи для определения типа
     const logs = point.logs;
     const isRealtime = mapState.currentProvider.value === "realtime";
 
+    // Приоритет: сначала проверяем логи, если есть (та же классификация co2/noise, вынесена в classifySensorTypeFromLogSamples)
+    if (Array.isArray(logs) && logs.length > 0) {
+      return classifySensorTypeFromLogSamples(logs);
+    }
+
     let hasCo2 = false;
     let hasNoise = false;
-
-    // Приоритет: сначала проверяем логи, если есть
-    if (Array.isArray(logs) && logs.length > 0) {
-      const logsData = checkLogsData(logs);
-      hasCo2 = logsData.hasCo2;
-      hasNoise = logsData.hasNoise;
-    } else if (isRealtime && point.data) {
-      // Для realtime, если нет логов, проверяем текущие данные
+    if (isRealtime && point.data) {
       const currentData = checkCurrentData(point.data);
       hasCo2 = currentData.hasCo2;
       hasNoise = currentData.hasNoise;

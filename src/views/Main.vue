@@ -71,14 +71,29 @@ const messagesUI = reactive(useMessages(localeComputed));
 const handleSensorClick = (data) => {
   const point = sensorsUI.formatPointForSensor(data);
 
-  mapState.setMapSettings(route, router, {
+  const mapClickQuery = {
     lat: point.geo?.lat || route.query.lat,
     lng: point.geo?.lng || route.query.lng,
     zoom: hasValidCoordinates(point.geo) ? 18 : 3,
-    sensor: point.sensor_id,
-  });
+  };
 
-  // updateSensorPopup вызывается в watcher на изменение URL
+  // Owner sensors: `owner=` in URL, no `sensor=` on marker click (select adds sensor).
+  // Legacy (no owner): clear stale `owner=`, use `sensor=` like classic deep links.
+  if (point.owner) {
+    mapState.setMapSettings(route, router, {
+      ...mapClickQuery,
+      owner: String(point.owner),
+      sensor: null,
+    });
+  } else {
+    mapState.setMapSettings(route, router, {
+      ...mapClickQuery,
+      owner: null,
+      sensor: point.sensor_id,
+    });
+  }
+
+  sensorsUI.updateSensorPopup(point, { fromMapClick: true });
 };
 
 // Обработчик клика на маркер сообщения
@@ -299,8 +314,8 @@ watch(
           sensorsUI.updateSensorMarkers();
         }
 
-        // После загрузки сенсоров обновляем попап, если есть сенсор в URL
-        const liveSensorId = route.query.sensor;
+        // После загрузки сенсоров обновляем попап: deep link `sensor=` или открытый попап (owner без sensor в URL)
+        const liveSensorId = route.query.sensor || sensorsUI.sensorPoint?.value?.sensor_id;
         if (liveSensorId) {
           // Ищем полные данные сенсора в sensorsUI.sensors
           const fullSensorData = sensorsUI.sensors.find((s) => s.sensor_id === liveSensorId);

@@ -201,9 +201,8 @@ const onLogsHealthDontShowWarningsForSensor = async () => {
 
 const hasLogs = computed(() => Array.isArray(props.log) && props.log.length > 0);
 
-const chartHasData = computed(
-  () => Array.isArray(props.point?.logs) && props.point.logs.length > 0
-);
+// Same source as `log` from parent: `null` = loading → skeleton; `[]` = empty → message; data → chart
+const chartHasData = computed(() => Array.isArray(props.log) && props.log.length > 0);
 
 const showLogsHealthWarningBanner = computed(
   () =>

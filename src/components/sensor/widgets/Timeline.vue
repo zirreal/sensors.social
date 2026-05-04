@@ -28,7 +28,47 @@
           Month
         </button>
       </div>
-<!-- 
+      <div v-if="displayOwnerOptions.length > 0" class="sensor-owner-select">
+        <button
+          type="button"
+          class="sensor-owner-select__control"
+          @click="toggleOwnerDropdown"
+          aria-haspopup="listbox"
+          :aria-expanded="ownerDropdownOpen ? 'true' : 'false'"
+        >
+          <img
+            v-if="currentOwnerOption?.icon"
+            :src="currentOwnerOption.icon"
+            :alt="currentOwnerOption.type || 'sensor'"
+            class="sensor-owner-select__icon"
+          />
+          <span class="sensor-owner-select__label">{{
+            currentOwnerOption?.label || "Sensor"
+          }}</span>
+          <span class="sensor-owner-select__chev">▾</span>
+        </button>
+
+        <div v-if="ownerDropdownOpen" class="sensor-owner-select__menu" role="listbox">
+          <button
+            v-for="opt in displayOwnerOptions"
+            :key="opt.id"
+            type="button"
+            role="option"
+            class="sensor-owner-select__option"
+            :class="{ active: opt.id === currentSensorId, disabled: opt.hasData === false }"
+            @click="selectOwnerSensor(opt.id)"
+          >
+            <img
+              v-if="opt.icon"
+              :src="opt.icon"
+              :alt="opt.type || 'sensor'"
+              class="sensor-owner-select__icon"
+            />
+            <span class="sensor-owner-select__label">{{ opt.label }}</span>
+          </button>
+        </div>
+      </div>
+      <!-- 
       <div class="sensor-timeline-actions">
         <slot name="actions" />
       </div> -->
@@ -68,7 +108,13 @@ import { useRoute, useRouter } from "vue-router";
 import { useI18n } from "vue-i18n";
 import { useMap } from "@/composables/useMap";
 import { useSensors } from "@/composables/useSensors";
+import { classifySensorTypeFromLogSamples } from "@/utils/map/sensors/requests";
 import { dayISO } from "../../../utils/date";
+
+import diyIcon from "@/assets/images/sensorTypes/DIY.svg";
+import insightIcon from "@/assets/images/sensorTypes/Insight.svg";
+import urbanIcon from "@/assets/images/sensorTypes/Urban.svg";
+import altruistIcon from "@/assets/images/sensorTypes/Altruist.svg";
 
 const props = defineProps({
   log: Array,
@@ -82,6 +128,132 @@ const router = useRouter();
 const { t } = useI18n();
 const mapState = useMap();
 const sensorsUI = useSensors();
+
+const currentSensorId = computed(() => props.point?.sensor_id || "");
+
+const ownerSensorOptions = computed(() => {
+  const list = props.point?.ownerSensorsWithData;
+  // Daily recap: show only sensors that actually have data.
+  const arr = Array.isArray(list) ? list.filter(Boolean) : [];
+  return arr.filter((o) => o.hasData === true);
+});
+
+const labeledOwnerOptions = computed(() => {
+  const opts = ownerSensorOptions.value;
+  const counts = { insight: 0, urban: 0, altruist: 0, diy: 0 };
+  const out = [];
+  for (const o of opts) {
+    const hasData = o?.hasData === true;
+    if (!hasData) continue;
+    const type = o?.type || "altruist";
+    if (!Object.prototype.hasOwnProperty.call(counts, type)) counts[type] = 0;
+    counts[type] += 1;
+    const n = counts[type];
+    const labelBase =
+      type === "insight"
+        ? "Insight"
+        : type === "urban"
+        ? "Urban"
+        : type === "diy"
+        ? "DIY"
+        : type === "altruist"
+        ? "Altruist"
+        : "Sensor";
+    const icon =
+      type === "insight"
+        ? insightIcon
+        : type === "urban"
+        ? urbanIcon
+        : type === "diy"
+        ? diyIcon
+        : altruistIcon;
+    if (o?.id) out.push({ id: o.id, type, hasData: true, icon, label: `${labelBase} #${n}` });
+  }
+  return out;
+});
+
+const activeFallbackOption = computed(() => {
+  const sid = currentSensorId.value;
+  if (!sid) return null;
+  const t = classifySensorTypeFromLogSamples(props.log);
+  if (!t) return null;
+  const icon = t === "insight" ? insightIcon : t === "urban" ? urbanIcon : altruistIcon;
+  const labelBase = t === "insight" ? "Insight" : t === "urban" ? "Urban" : "Altruist";
+  return { id: sid, type: t, hasData: true, icon, label: `${labelBase} (active)` };
+});
+
+const selectedOwnerSensorId = computed(() => {
+  // Always reflect the actually opened sensor. If options aren't ready yet, keep current id.
+  const sid = currentSensorId.value;
+  return sid || labeledOwnerOptions.value[0]?.id || "";
+});
+
+const displayOwnerOptions = computed(() => {
+  const sid = currentSensorId.value;
+  const opts = labeledOwnerOptions.value.slice();
+  if (!sid) return opts;
+  if (opts.some((o) => o.id === sid)) return opts;
+  // Meta/options not ready yet for current sensor, but logs are already loaded -> inject active option.
+  const fb = activeFallbackOption.value;
+  if (fb) return [fb, ...opts];
+  return opts;
+});
+
+const ownerDropdownOpen = ref(false);
+
+const currentOwnerOption = computed(() => {
+  const sid = currentSensorId.value || selectedOwnerSensorId.value;
+  const match = displayOwnerOptions.value.find((o) => o.id === sid);
+  if (match) return match;
+  // Still nothing (no logs + no meta). Avoid random option, but don't get stuck when logs exist.
+  return { id: sid, type: null, icon: null, label: "Loading…" };
+});
+
+const toggleOwnerDropdown = () => {
+  ownerDropdownOpen.value = !ownerDropdownOpen.value;
+};
+
+const closeOwnerDropdown = () => {
+  ownerDropdownOpen.value = false;
+};
+
+const selectOwnerSensor = (id) => {
+  const nextId = String(id || "").trim();
+  if (!nextId || nextId === currentSensorId.value) {
+    closeOwnerDropdown();
+    return;
+  }
+  const opt = displayOwnerOptions.value.find((o) => o.id === nextId);
+  if (opt && opt.hasData === false) {
+    // show all sensors, but don't allow switching to sensors with no data
+    closeOwnerDropdown();
+    return;
+  }
+
+  const cachedOwner =
+    sensorsUI?.sensors?.value?.find?.((s) => String(s?.sensor_id || "") === nextId)?.owner || null;
+
+  mapState.setMapSettings(route, router, {
+    lat: props.point?.geo?.lat ?? route.query.lat,
+    lng: props.point?.geo?.lng ?? route.query.lng,
+    zoom: route.query.zoom ?? 18,
+    sensor: nextId,
+    // Keep existing owner in URL (if known); ensureOwnerLoaded will fill it if missing.
+    owner:
+      props.point?.owner || cachedOwner ? String(props.point?.owner || cachedOwner) : undefined,
+  });
+  // Trigger owner loading for the newly selected sensor so URL can get `owner=` back.
+  try {
+    sensorsUI?.ensureOwnerLoaded?.(nextId);
+  } catch {}
+  closeOwnerDropdown();
+};
+
+const onWindowPointerDown = (e) => {
+  if (!ownerDropdownOpen.value) return;
+  const root = e?.target?.closest?.(".sensor-owner-select");
+  if (!root) closeOwnerDropdown();
+};
 
 // Локальное состояние
 const state = reactive({
@@ -106,6 +278,10 @@ const pickedDate = computed({
   get: () => mapState.currentDate.value,
   set: (value) => {
     mapState.setCurrentDate(value);
+    // Keep URL in sync (week/month already use setMapSettings; day-only was missing this).
+    if (value && mapState.currentProvider.value === "remote") {
+      mapState.setMapSettings(route, router, { date: value });
+    }
   },
 });
 
@@ -224,6 +400,7 @@ const handleDateChange = async (event) => {
 };
 
 onMounted(() => {
+  window.addEventListener("pointerdown", onWindowPointerDown);
   // Инициализируем режим таймлайна в зависимости от провайдера
   if (mapState.currentProvider.value === "realtime") {
     state.timelineMode = "realtime";
@@ -248,6 +425,7 @@ onMounted(() => {
 
   // Очищаем интервал при размонтировании
   onUnmounted(() => {
+    window.removeEventListener("pointerdown", onWindowPointerDown);
     clearInterval(timeInterval);
   });
 });
@@ -290,6 +468,11 @@ watch(
   align-items: center;
   gap: calc(var(--gap) * 0.5); */
   text-align: center;
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  justify-content: space-between;
+  gap: calc(var(--gap) * 0.75);
 }
 
 /* .sensor-timeline-left {
@@ -309,6 +492,95 @@ watch(
   background-color: var(--color-light-gray);
   border-radius: 20px;
   width: fit-content;
+}
+
+.sensor-owner-select {
+  display: flex;
+  justify-content: center;
+  position: relative;
+  margin-right: calc(var(--gap) * 0.9);
+}
+
+.sensor-owner-select__control {
+  min-width: 180px;
+  max-width: min(420px, 60vw);
+  padding: calc(var(--gap) * 0.35) calc(var(--gap) * 0.6);
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--color-middle-gray);
+  background: var(--color-light);
+  color: var(--color-text);
+  font-size: 0.85em;
+  display: inline-flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: calc(var(--gap) * 0.4);
+  cursor: pointer;
+}
+
+.sensor-owner-select__icon {
+  width: 18px;
+  height: 18px;
+  display: inline-block;
+  flex: 0 0 auto;
+}
+
+.sensor-owner-select__label {
+  flex: 1 1 auto;
+  text-align: left;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.sensor-owner-select__chev {
+  flex: 0 0 auto;
+  opacity: 0.75;
+}
+
+.sensor-owner-select__menu {
+  position: absolute;
+  right: 0;
+  top: calc(100% + 6px);
+  z-index: 50;
+  min-width: min(420px, 60vw);
+  max-height: 260px;
+  overflow: auto;
+  background: var(--color-light);
+  border: 1px solid var(--color-middle-gray);
+  border-radius: var(--radius-sm);
+  box-shadow: 0 8px 20px rgba(0, 0, 0, 0.15);
+  padding: 6px;
+}
+
+.sensor-owner-select__option {
+  width: 100%;
+  border: 0;
+  background: transparent;
+  color: var(--color-text);
+  display: flex;
+  align-items: center;
+  gap: calc(var(--gap) * 0.4);
+  padding: 8px 10px;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+}
+
+.sensor-owner-select__option:hover {
+  background: var(--color-light-gray);
+}
+
+.sensor-owner-select__option.disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+.sensor-owner-select__option.disabled:hover {
+  background: transparent;
+}
+
+.sensor-owner-select__option.active {
+  background: color-mix(in srgb, var(--color-link) 12%, transparent);
+  border: 1px solid color-mix(in srgb, var(--color-link) 40%, transparent);
 }
 
 .sensor-timeline-tabs button {

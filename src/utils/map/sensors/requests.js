@@ -12,6 +12,72 @@ const LIBP2P_PROVIDER = new Libp2pProvider(settings.LIBP2P);
 // Глобальный объект провайдера
 let providerObj = null;
 
+// Cache latest v2 meta for a sensor to drive UI (owner sensors dropdown, etc.)
+const latestSensorMetaById = new Map();
+
+/** Max distance (km) between urban points of the same owner to share one map marker. */
+const OWNER_GEO_CLUSTER_KM = 100;
+
+function haversineKm(geoA, geoB) {
+  const lat1 = Number(geoA?.lat);
+  const lng1 = Number(geoA?.lng);
+  const lat2 = Number(geoB?.lat);
+  const lng2 = Number(geoB?.lng);
+  if (![lat1, lng1, lat2, lng2].every((n) => Number.isFinite(n))) return Infinity;
+  const R = 6371;
+  const dLat = ((lat2 - lat1) * Math.PI) / 180;
+  const dLng = ((lng2 - lng1) * Math.PI) / 180;
+  const a =
+    Math.sin(dLat / 2) ** 2 +
+    Math.cos((lat1 * Math.PI) / 180) * Math.cos((lat2 * Math.PI) / 180) * Math.sin(dLng / 2) ** 2;
+  return 2 * R * Math.asin(Math.min(1, Math.sqrt(a)));
+}
+
+/**
+ * One marker per owner only when deployments are geographically close.
+ * Same owner in distant regions (e.g. Asia vs Europe) keeps separate markers.
+ */
+function dedupeByOwnerProximity(list, maxKm = OWNER_GEO_CLUSTER_KM) {
+  const withoutOwner = [];
+  const byOwner = new Map();
+
+  for (const item of Array.isArray(list) ? list : []) {
+    const owner = item?.owner ? String(item.owner) : "";
+    if (!owner) {
+      withoutOwner.push(item);
+      continue;
+    }
+    if (!byOwner.has(owner)) byOwner.set(owner, []);
+    byOwner.get(owner).push(item);
+  }
+
+  const out = [...withoutOwner];
+
+  for (const items of byOwner.values()) {
+    const clusters = [];
+    for (const item of items) {
+      const geo = item.geo;
+      let placed = false;
+      for (const c of clusters) {
+        const closeEnough = c.members.some((m) => haversineKm(geo, m.geo) <= maxKm);
+        if (closeEnough) {
+          c.members.push(item);
+          placed = true;
+          break;
+        }
+      }
+      if (!placed) {
+        clusters.push({ members: [item] });
+      }
+    }
+    for (const c of clusters) {
+      out.push(c.members[0]);
+    }
+  }
+
+  return out;
+}
+
 // Импортируем утилиты для работы с IndexedDB
 import {
   IDBworkflow,
@@ -104,7 +170,8 @@ export async function getSensors(start, end, provider = "remote") {
         geo: { lat, lng },
         address: sensorData.address || null,
         donated_by: sensorData.donated_by || null,
-        owner: sensorData.owner || null,
+        // Many urban points don't include `owner`; treat `donated_by` as owner for URL/UI purposes.
+        owner: sensorData.owner || sensorData.donated_by || null,
         timestamp: sensorData.timestamp || null,
       };
 
@@ -121,10 +188,13 @@ export async function getSensors(start, end, provider = "remote") {
     const filteredSensors = filterSensorsByConfig(sensors);
     const filteredSensorsNoLocation = filterSensorsByConfig(sensorsNoLocation);
 
+    const ownerDedupedSensors = dedupeByOwnerProximity(filteredSensors);
+    const ownerDedupedSensorsNoLocation = dedupeByOwnerProximity(filteredSensorsNoLocation);
+
     const bounds = getConfigBounds(settings);
     return {
-      sensors: filterByBounds(filteredSensors, bounds),
-      sensorsNoLocation: filterByBounds(filteredSensorsNoLocation, bounds),
+      sensors: filterByBounds(ownerDedupedSensors, bounds),
+      sensorsNoLocation: filterByBounds(ownerDedupedSensorsNoLocation, bounds),
     };
   }
 }
@@ -142,12 +212,12 @@ function filterSensorsByConfig(sensors) {
   const { mode, sensors: configSensors } = excluded_sensors;
   const sensorIdsSet = new Set(configSensors);
 
-  if (mode === 'include-only') {
+  if (mode === "include-only") {
     // Whitelist: показываем только сенсоры из списка
-    return sensors.filter(sensor => sensorIdsSet.has(sensor.sensor_id));
+    return sensors.filter((sensor) => sensorIdsSet.has(sensor.sensor_id));
   } else {
     // Blacklist (exclude): скрываем сенсоры из списка
-    return sensors.filter(sensor => !sensorIdsSet.has(sensor.sensor_id));
+    return sensors.filter((sensor) => !sensorIdsSet.has(sensor.sensor_id));
   }
 }
 
@@ -161,12 +231,12 @@ export async function getSensorOwner(sensorId) {
 
   try {
     // Используем короткий промежуток времени - последний час
-    const end = Date.now();
-    const start = end - 3600000; // 1 час назад
+    const end = Math.floor(Date.now() / 1000);
+    const start = end - 3600; // 1 час назад (seconds)
 
     // Делаем прямой запрос, чтобы получить полный объект ответа с sensor.owner
     const result = await fetchJson(
-      `${settings.REMOTE_PROVIDER}api/sensor/${sensorId}/${start}/${end}`,
+      `${settings.REMOTE_PROVIDER}api/v2/sensor/${sensorId}/${start}/${end}`,
       { cache: "no-store" }
     );
 
@@ -178,6 +248,64 @@ export async function getSensorOwner(sensorId) {
     return null;
   } catch (error) {
     console.warn("Failed to load sensor owner:", error);
+    return null;
+  }
+}
+
+/**
+ * Insight vs urban vs altruist from API log rows `{ data: { co2?, noiseavg?, noisemax? } }`.
+ * @returns {null|string} `null` if samples is empty; otherwise a type string.
+ */
+export function classifySensorTypeFromLogSamples(samples) {
+  if (!Array.isArray(samples) || samples.length === 0) return null;
+  let hasCo2 = false;
+  let hasNoise = false;
+  for (const item of samples) {
+    const d = item?.data || null;
+    if (d && d.co2 != null) hasCo2 = true;
+    if (d && (d.noiseavg != null || d.noisemax != null)) hasNoise = true;
+    if (hasCo2 && hasNoise) break;
+  }
+  if (hasCo2 && !hasNoise) return "insight";
+  if (!hasCo2 && hasNoise) return "urban";
+  return "altruist";
+}
+
+/**
+ * Returns "related sensors" (same owner) that have non-empty data in the latest v2 response.
+ * Uses meta cached by getSensorData() v2 fetches.
+ */
+export function getOwnerSensorsWithData(sensorId) {
+  if (!sensorId) return [];
+  const meta = latestSensorMetaById.get(sensorId);
+  const sensors = Array.isArray(meta?.sensors) ? meta.sensors : [];
+  const data = meta?.data && typeof meta.data === "object" ? meta.data : {};
+
+  return sensors.map((id) => {
+    const points = Array.isArray(data?.[id]) ? data[id] : [];
+    const hasData = Array.isArray(points) && points.length > 0;
+    return { id, hasData, type: hasData ? classifySensorTypeFromLogSamples(points) : null };
+  });
+}
+
+/**
+ * Preloads v2 `{ sensor: { sensors, data, owner } }` meta and caches it,
+ * so UI (owner dropdown) can render before full logs are loaded.
+ */
+export async function preloadSensorMeta(sensorId, startTimestamp, endTimestamp, signal = null) {
+  if (!sensorId) return null;
+  try {
+    const payload = await fetchJson(
+      `${settings.REMOTE_PROVIDER}api/v2/sensor/${sensorId}/${startTimestamp}/${endTimestamp}`,
+      { cache: "no-store", signal }
+    );
+    if (payload?.sensor && typeof payload.sensor === "object") {
+      latestSensorMetaById.set(sensorId, payload.sensor);
+      return payload.sensor;
+    }
+    return null;
+  } catch (error) {
+    if (signal && signal.aborted) return null;
     return null;
   }
 }
@@ -234,11 +362,15 @@ export async function getSensorData(
         return Array.isArray(historyData) ? historyData : null;
       }
     } else {
-      const historyData = await REMOTE_PROVIDER.getHistoryPeriodBySensor(
-        sensorId,
-        startTimestamp,
-        endTimestamp
+      // v2 endpoint returns `{ result: [...], sensor: { owner, sensors: [...], data: { [id]: [...] } } }`
+      const payload = await fetchJson(
+        `${settings.REMOTE_PROVIDER}api/v2/sensor/${sensorId}/${startTimestamp}/${endTimestamp}`,
+        { cache: "no-store", signal }
       );
+      if (payload?.sensor && typeof payload.sensor === "object") {
+        latestSensorMetaById.set(sensorId, payload.sensor);
+      }
+      const historyData = payload?.result;
       // Если данных нет, возвращаем [] (загружено, но пусто), если null/undefined - null (не загружено)
       return Array.isArray(historyData) ? historyData : null;
     }

@@ -302,10 +302,7 @@ const handleKeydown = (event) => {
   }
 };
 
-const sensor_id = computed(() => {
-  // sensor_id всегда приходит из props.point (обрабатывается в Main.vue)
-  return props.point?.sensor_id || null;
-});
+const sensor_id = computed(() => point.value?.sensor_id || null);
 
 // Аватарка сенсора на основе ID
 const sensorAvatar = ref(null);
@@ -330,12 +327,9 @@ watch(
   { immediate: true }
 );
 
-const geo = computed(() => {
-  // Координаты всегда приходят из props.point.geo (обрабатывается в Main.vue)
-  return props.point?.geo || { lat: 0, lng: 0 };
-});
+const geo = computed(() => point.value?.geo || { lat: 0, lng: 0 });
 
-const owner = computed(() => props.point?.owner || null);
+const owner = computed(() => point.value?.owner || null);
 
 // Проверяем, добавлен ли сенсор в закладки
 const isBookmarked = computed(() => {
@@ -344,10 +338,10 @@ const isBookmarked = computed(() => {
 });
 
 // Гарантируем, что logs всегда массив
-const log = computed(() => (Array.isArray(props.point?.logs) ? props.point.logs : null));
+const log = computed(() => (Array.isArray(point.value?.logs) ? point.value.logs : null));
 
 // Вычисляем тип сенсора используя функцию из composable
-const sensorType = computed(() => sensorsUI.getSensorType(props.point));
+const sensorType = computed(() => sensorsUI.getSensorType(point.value));
 
 // Вычисляем путь к изображению типа сенсора
 const sensorTypeImage = computed(() => {
@@ -419,11 +413,12 @@ onBeforeUnmount(() => {
 // Watcher для изменений даты (из UI или внешних источников)
 watch(
   () => mapState.currentDate.value,
-  (newDate) => {
-    if (newDate) {
-      // Очищаем логи при смене даты
-      sensorsUI.clearSensorLogs(props.point?.sensor_id);
-    }
+  async (newDate, oldDate) => {
+    if (!newDate || oldDate === undefined || newDate === oldDate) return;
+    const sid = sensor_id.value;
+    if (!sid || !sensorsUI.isSensorOpen(sid)) return;
+    sensorsUI.clearSensorLogs(sid);
+    await sensorsUI.updateSensorLogs(sid);
   }
 );
 

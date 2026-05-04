@@ -32,6 +32,29 @@
         <div class="sharelink-settings-item">
           <div>
             <label>
+              <input type="checkbox" v-model="includeSensor" />
+              {{ t("sensorpopup.infosensorid") || "Sensor" }}
+            </label>
+          </div>
+          <select v-model="selectedSensor" :disabled="!includeSensor || sensorSelectOptions.length === 0">
+            <option v-for="opt in sensorSelectOptions" :key="opt.value" :value="opt.value">
+              {{ opt.label }}
+            </option>
+          </select>
+          <div class="sharelink-settings-hint">
+            {{
+              includeSensor
+                ? t("Share link will open selected sensor popup") ||
+                  "Share link will open selected sensor popup"
+                : t("Share by owner only (no sensor parameter)") ||
+                  "Share by owner only (no sensor parameter)"
+            }}
+          </div>
+        </div>
+
+        <div class="sharelink-settings-item">
+          <div>
+            <label>
               <input type="checkbox" v-model="includeType" />
               {{ t("sensorpopup.type") || "Measurement Type" }}
             </label>
@@ -114,8 +137,13 @@ const filters = proxy?.$filters || null;
 const selectedProvider = ref(route.query.provider || "realtime");
 const selectedType = ref(route.query.type || "pm10");
 const selectedDate = ref(route.query.date || dayISO());
+const selectedSensor = ref("");
 
 // Флаги для включения параметров в URL
+// Default share style:
+// - if we have owner: share by owner (no sensor) by default
+// - if legacy (no owner): include sensor by default (otherwise link is ambiguous)
+const includeSensor = ref(false);
 const includeProvider = ref(!!route.query.provider);
 const includeType = ref(!!route.query.type);
 const includeDate = ref(!!route.query.date);
@@ -219,9 +247,16 @@ const generatedLink = computed(() => {
   const baseUrl = window.location.origin + route.path;
   const queryParams = new URLSearchParams();
 
-  // Всегда включаем sensor из текущего URL
-  if (route.query.sensor) {
-    queryParams.set("sensor", route.query.sensor);
+  // Add owner only if we actually have it (legacy sensors keep old URL)
+  const owner = props.point?.owner ? String(props.point.owner).trim() : "";
+  if (owner) {
+    queryParams.set("owner", owner);
+  }
+
+  // Include sensor only if explicitly enabled (or legacy fallback will enable it).
+  const sensorId = String(selectedSensor.value || "").trim();
+  if (includeSensor.value && sensorId) {
+    queryParams.set("sensor", sensorId);
   }
 
   // Добавляем выбранный тип данных только если чекбокс отмечен
@@ -242,6 +277,39 @@ const generatedLink = computed(() => {
   const queryString = queryParams.toString();
   return queryString ? `${baseUrl}?${queryString}` : baseUrl;
 });
+
+const activeSensorId = computed(() =>
+  String(route.query.sensor || props.point?.sensor_id || "").trim()
+);
+
+const sensorSelectOptions = computed(() => {
+  const active = activeSensorId.value;
+  const list = Array.isArray(props.point?.ownerSensorsWithData) ? props.point.ownerSensorsWithData : [];
+  const ids = new Set();
+  if (active) ids.add(active);
+  for (const o of list) {
+    // show only sensors that actually have data
+    if (o?.hasData !== true) continue;
+    const id = String(o?.id || "").trim();
+    if (id) ids.add(id);
+  }
+  return Array.from(ids).map((id) => ({
+    value: id,
+    label: id === active ? `${id} (active)` : id,
+  }));
+});
+
+// Keep selected sensor in sync with active sensor
+watch(
+  [activeSensorId, () => props.point?.owner],
+  ([sid, owner]) => {
+    const hasOwner = Boolean(String(owner || "").trim());
+    // default includeSensor: only for legacy sensors
+    includeSensor.value = !hasOwner;
+    if (sid) selectedSensor.value = sid;
+  },
+  { immediate: true }
+);
 
 function applyPreset(id) {
   activePreset.value = id;
@@ -474,6 +542,12 @@ onBeforeUnmount(() => {
   display: flex;
   flex-direction: column;
   gap: calc(var(--gap) * 0.5);
+}
+
+.sharelink-settings-hint {
+  font-size: 0.8em;
+  color: var(--color-gray, #666);
+  line-height: 1.2;
 }
 
 .sharelink-advanced {
