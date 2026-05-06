@@ -310,7 +310,7 @@ const handleTimelineModeChange = (mode) => {
   } else {
     // Для day/week/month переключаемся на remote провайдер
     mapState.setMapSettings(route, router, { provider: "remote" });
-    mapState.setTimelineMode(mode);
+    mapState.setTimelineMode(mode, props.point?.sensor_id);
 
     // Для day/week/month не меняем дату - только переключаем провайдер
     // Логи будут загружены с правильными границами в updateSensorLogs

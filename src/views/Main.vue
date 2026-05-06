@@ -195,7 +195,7 @@ watch(
       newMode !== oldMode &&
       oldMode !== "realtime" &&
       mapState.currentProvider.value === "remote" &&
-      route.query.sensor
+      (route.query.sensor || route.query.owner)
     ) {
       // Отписываемся от realtime провайдера перед загрузкой новых данных
       if (unwatchRealtime) {
@@ -203,10 +203,12 @@ watch(
         unwatchRealtime = null;
       }
 
+      const id = route.query.owner ? mapState.currentSensorId.value : route.query.sensor;
+
       // При смене периода очищаем логи и загружаем заново
-      sensorsUI.clearSensorLogs(route.query.sensor);
+      sensorsUI.clearSensorLogs(id);
       // Обновляем логи открытого сенсора
-      await sensorsUI.updateSensorLogs(route.query.sensor);
+      await sensorsUI.updateSensorLogs(id);
     }
   }
 );

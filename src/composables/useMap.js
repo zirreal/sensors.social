@@ -38,6 +38,7 @@ const currentProvider = ref(
   localStorage.getItem("provider_type") || settings?.DEFAULT_TYPE_PROVIDER || "remote"
 );
 const timelineMode = ref("day");
+const currentSensorId = ref(null);
 
 export function useMap() {
   const toFinite = (v) => {
@@ -99,10 +100,11 @@ export function useMap() {
     }
   };
 
-  const setTimelineMode = (mode) => {
+  const setTimelineMode = (mode, id) => {
     const m = String(mode || "day");
     if (["day", "week", "month", "realtime"].includes(m)) {
       timelineMode.value = m;
+      currentSensorId.value = id;
     }
   };
 
@@ -288,6 +290,7 @@ export function useMap() {
     aqiVersion,
     currentProvider,
     timelineMode,
+    currentSensorId,
 
     // Actions
     setmapposition,
