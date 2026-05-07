@@ -703,6 +703,159 @@ export function useSensors(localeComputed) {
   };
 
   /**
+   * Remote-only fallback: for CO2, the "urban" sensor id can have no CO2,
+   * but the owner bundle may include an "insight" sensor with CO2 samples.
+   * We progressively hydrate `maxdata.co2` from the v2 meta (`sensor.data`) and
+   * update markers as values become available.
+   */
+  const hydrateCo2MaxFromOwnerBundle = async (start, end) => {
+    if (mapState.currentProvider.value !== "remote") return;
+    if (mapState.currentUnit.value !== "co2") return;
+    if (!Array.isArray(sensors.value) || sensors.value.length === 0) return;
+
+    const CONCURRENCY = 20;
+
+    const computeMaxCo2FromMeta = (meta) => {
+      const data =
+        meta?.data && typeof meta.data === "object"
+          ? meta.data
+          : null;
+
+      if (!data) return null;
+
+      let max = null;
+
+      for (const points of Object.values(data)) {
+        if (!Array.isArray(points)) continue;
+
+        for (const item of points) {
+          const n = Number(item?.data?.co2);
+
+          if (!Number.isFinite(n)) continue;
+
+          if (max === null || n > max) {
+            max = n;
+          }
+        }
+      }
+
+      return max;
+    };
+
+    const shouldHydrate = (sensor) => {
+      if (!sensor?.sensor_id) return false;
+
+      const existing = sensor?.maxdata?.co2;
+
+      // already hydrated
+      if (
+        existing !== null &&
+        existing !== undefined &&
+        Number.isFinite(Number(existing))
+      ) {
+        return false;
+      }
+
+      return !!sensor.owner;
+    };
+
+    /**
+     * owner -> sensors[]
+     */
+    const ownerGroups = new Map();
+
+    for (const sensor of sensors.value) {
+      if (!shouldHydrate(sensor)) continue;
+
+      const owner = sensor.owner;
+
+      if (!ownerGroups.has(owner)) {
+        ownerGroups.set(owner, []);
+      }
+
+      ownerGroups.get(owner).push(sensor);
+    }
+
+    if (ownerGroups.size === 0) return;
+
+    /**
+     * Queue ONE representative sensor per owner.
+     * We fetch bundle/meta once and apply to all owner sensors.
+     */
+    const queue = [];
+
+    for (const [owner, ownerSensors] of ownerGroups.entries()) {
+      const representative = ownerSensors[0];
+
+      queue.push({
+        owner,
+        representativeSensorId: representative.sensor_id,
+        sensors: ownerSensors,
+      });
+    }
+
+    const work = async ({
+      owner,
+      representativeSensorId,
+      sensors: ownerSensors,
+    }) => {
+      try {
+
+        const meta = await preloadSensorMeta(
+          representativeSensorId,
+          start,
+          end
+        );
+
+        const maxCo2 = computeMaxCo2FromMeta(meta);
+
+        if (maxCo2 === null) return;
+
+        // apply to ALL owner sensors
+        for (const sensor of ownerSensors) {
+          sensor.maxdata ||= {};
+          sensor.maxdata.co2 = maxCo2;
+
+          updateSensorMarker(sensor);
+        }
+      } catch (e) {
+        console.error(
+          "hydrateCo2MaxFromOwnerBundle",
+          owner,
+          representativeSensorId,
+          e
+        );
+      }
+    };
+
+    /**
+     * Concurrent workers
+     */
+    const runners = Array.from(
+      { length: Math.min(CONCURRENCY, queue.length) },
+      async () => {
+        while (queue.length > 0) {
+          const item = queue.shift();
+
+          if (!item) break;
+
+          // stop if user switched context
+          if (
+            mapState.currentUnit.value !== "co2" ||
+            mapState.currentProvider.value !== "remote"
+          ) {
+            return;
+          }
+
+          await work(item);
+        }
+      }
+    );
+
+    await Promise.allSettled(runners);
+  };
+  
+  /**
    * Обновляет один маркер на карте с правильным цветом и данными
    * @param {Object} point - Данные сенсора для маркера
    * @param {string} point.sensor_id - ID сенсора
@@ -851,6 +1004,10 @@ export function useSensors(localeComputed) {
 
       // Обновляем маркеры после обновления maxdata
       updateSensorMarkers(false);
+
+      if (mapState.currentUnit.value === "co2") {
+        void hydrateCo2MaxFromOwnerBundle(start, end);
+      }
     } catch (error) {
       console.error("Error updating maxdata:", error);
     }
