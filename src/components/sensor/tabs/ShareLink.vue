@@ -36,7 +36,10 @@
               {{ t("sensorpopup.infosensorid") || "Sensor" }}
             </label>
           </div>
-          <select v-model="selectedSensor" :disabled="!includeSensor || sensorSelectOptions.length === 0">
+          <select
+            v-model="selectedSensor"
+            :disabled="!includeSensor || sensorSelectOptions.length === 0"
+          >
             <option v-for="opt in sensorSelectOptions" :key="opt.value" :value="opt.value">
               {{ opt.label }}
             </option>
@@ -141,14 +144,12 @@ const selectedSensor = ref("");
 
 // Флаги для включения параметров в URL
 // Default share style:
-// - if we have owner: share by owner (no sensor) by default
-// - if legacy (no owner): include sensor by default (otherwise link is ambiguous)
-const includeSensor = ref(false);
+// - always include concrete `sensor=` by default so a pasted link opens the popup immediately
+// - user can still uncheck "Sensor" to share by owner only
+const includeSensor = ref(true);
 const includeProvider = ref(!!route.query.provider);
 const includeType = ref(!!route.query.type);
 const includeDate = ref(!!route.query.date);
-
-const activePreset = ref(null);
 
 // Получаем доступные типы из данных сенсора
 const availableTypes = computed(() => {
@@ -284,7 +285,9 @@ const activeSensorId = computed(() =>
 
 const sensorSelectOptions = computed(() => {
   const active = activeSensorId.value;
-  const list = Array.isArray(props.point?.ownerSensorsWithData) ? props.point.ownerSensorsWithData : [];
+  const list = Array.isArray(props.point?.ownerSensorsWithData)
+    ? props.point.ownerSensorsWithData
+    : [];
   const ids = new Set();
   if (active) ids.add(active);
   for (const o of list) {
@@ -301,62 +304,11 @@ const sensorSelectOptions = computed(() => {
 
 // Keep selected sensor in sync with active sensor
 watch(
-  [activeSensorId, () => props.point?.owner],
-  ([sid, owner]) => {
-    const hasOwner = Boolean(String(owner || "").trim());
-    // default includeSensor: only for legacy sensors
-    includeSensor.value = !hasOwner;
+  activeSensorId,
+  (sid) => {
+    // Always default to include the specific sensor so the link deep-links to the popup.
+    includeSensor.value = true;
     if (sid) selectedSensor.value = sid;
-  },
-  { immediate: true }
-);
-
-function applyPreset(id) {
-  activePreset.value = id;
-  if (id === "realtime-now") {
-    includeProvider.value = true;
-    selectedProvider.value = "realtime";
-    includeType.value = false;
-    includeDate.value = false;
-    return;
-  }
-  if (id === "remote-day") {
-    includeProvider.value = true;
-    selectedProvider.value = "remote";
-    includeDate.value = true;
-    selectedDate.value = dayISO();
-    includeType.value = true;
-    if (typeOptions.value.length > 0) {
-      selectedType.value = typeOptions.value[0].value;
-    }
-    return;
-  }
-}
-
-const derivedPreset = computed(() => {
-  const today = dayISO();
-  const isRealtimeNow =
-    includeProvider.value === true &&
-    selectedProvider.value === "realtime" &&
-    includeType.value === false &&
-    includeDate.value === false;
-  if (isRealtimeNow) return "realtime-now";
-
-  const isRemoteDay =
-    includeProvider.value === true &&
-    selectedProvider.value === "remote" &&
-    includeDate.value === true &&
-    selectedDate.value === today &&
-    includeType.value === true;
-  if (isRemoteDay) return "remote-day";
-
-  return null;
-});
-
-watch(
-  derivedPreset,
-  (next) => {
-    activePreset.value = next;
   },
   { immediate: true }
 );

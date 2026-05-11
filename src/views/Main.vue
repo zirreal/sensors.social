@@ -195,6 +195,10 @@ watch(
 watch(
   () => mapState.timelineMode.value,
   async (newMode, oldMode) => {
+    // Popup component now owns logs reloading on day/week/month switches.
+    // Keeping a second reloader here causes duplicate requests/aborts, which can hide the progress bar.
+    if (sensorsUI?.isSensor) return;
+
     // При переходе realtime -> day/week/month загрузка уже запускается через route.query watcher
     // (providerChanged), иначе получаем дублирующий запрос логов.
     if (
@@ -316,6 +320,41 @@ watch(
       }
 
       sensorsUI.loadSensors().then(async () => {
+        const pickDefaultOwnerSensorId = (owner, lat, lng) => {
+          const o = String(owner || "").trim();
+          if (!o) return null;
+
+          const list = Array.isArray(sensorsUI.sensors)
+            ? sensorsUI.sensors
+            : Array.isArray(sensorsUI.sensors?.value)
+              ? sensorsUI.sensors.value
+              : [];
+
+          const ownerSensors = list.filter((s) => String(s?.owner || "") === o);
+          if (ownerSensors.length === 0) return null;
+
+          const latN = Number(lat);
+          const lngN = Number(lng);
+          const hasAnchor = Number.isFinite(latN) && Number.isFinite(lngN);
+          if (!hasAnchor) {
+            return ownerSensors[0]?.sensor_id || null;
+          }
+
+          let bestId = ownerSensors[0]?.sensor_id || null;
+          let bestDist = Infinity;
+          const anchor = { lat: latN, lng: lngN };
+
+          for (const s of ownerSensors) {
+            const d = haversineKm(anchor, s?.geo);
+            if (d < bestDist) {
+              bestDist = d;
+              bestId = s?.sensor_id || bestId;
+            }
+          }
+
+          return bestId || null;
+        };
+
         const ensureSensorVisibleInRemoteBundle = async (sensorId) => {
           const sid = sensorId ? String(sensorId) : "";
           if (!sid || mapState.currentProvider.value !== "remote") return;
@@ -328,8 +367,8 @@ watch(
           const currentList = Array.isArray(sensorsUI.sensors?.value)
             ? sensorsUI.sensors.value
             : Array.isArray(sensorsUI.sensors)
-              ? sensorsUI.sensors
-              : [];
+            ? sensorsUI.sensors
+            : [];
 
           if (currentList.some((s) => String(s?.sensor_id || "") === sid)) return;
 
@@ -367,7 +406,12 @@ watch(
         }
 
         // После загрузки сенсоров обновляем попап: deep link `sensor=` или открытый попап (owner без sensor в URL)
-        const liveSensorId = route.query.sensor || sensorsUI.sensorPoint?.value?.sensor_id;
+        const ownerDefaultId =
+          !route.query.sensor && route.query.owner
+            ? pickDefaultOwnerSensorId(route.query.owner, route.query.lat, route.query.lng)
+            : null;
+
+        const liveSensorId = route.query.sensor || ownerDefaultId || sensorsUI.sensorPoint?.value?.sensor_id;
         if (liveSensorId) {
           // Ищем полные данные сенсора в sensorsUI.sensors
           const fullSensorData = sensorsUI.sensors.find((s) => s.sensor_id === liveSensorId);

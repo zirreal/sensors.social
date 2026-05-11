@@ -15,6 +15,10 @@ let providerObj = null;
 // Cache latest v2 meta for a sensor to drive UI (owner sensors dropdown, etc.)
 const latestSensorMetaById = new Map();
 
+// In-memory cache for week/month logs (v2 payload can be very large for owners with many sensors).
+// This avoids re-downloading when toggling week <-> month <-> week in the same session.
+const periodLogsCache = new Map();
+
 /** Max distance (km) between points of the same owner to share one map marker. */
 export const OWNER_GEO_CLUSTER_KM = 5;
 
@@ -328,8 +332,8 @@ export function getOwnerSensorsWithData(sensorId) {
   return sensors.map((id) => {
     const points = Array.isArray(data?.[id]) ? data[id] : [];
     const hasData = Array.isArray(points) && points.length > 0;
-    const geo = hasData ? points[points.length - 1].geo : '';
-    return { id, hasData, type: hasData ? classifySensorTypeFromLogSamples(points) : null, geo};
+    const geo = hasData ? points[points.length - 1].geo : "";
+    return { id, hasData, type: hasData ? classifySensorTypeFromLogSamples(points) : null, geo };
   });
 }
 
@@ -838,6 +842,10 @@ export async function getSensorDataWithCache(
 
     // Получаем список нужных дней
     const neededDays = getDaysBetween(startDate, endDate);
+
+    // NOTE: We intentionally use the per-day caching path (below) for week/month.
+    // It provides real progress updates (loadedDays/totalDays) and keeps the UI responsive
+    // even when v2 payloads are large for owners with many sensors.
 
     // Проверяем что есть в кэше (включая адрес)
     const cachedResult = await getCachedData(sensorId, neededDays);

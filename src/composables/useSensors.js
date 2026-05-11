@@ -90,6 +90,8 @@ let realtimeLogsLoadInFlight = false;
 let currentRequestId = null;
 let currentLogsRequestId = null;
 let currentLogsAbortController = null;
+let currentLogsKey = null;
+let logsRequestInFlight = false;
 
 export function useSensors(localeComputed) {
   const localeRef =
@@ -272,6 +274,14 @@ export function useSensors(localeComputed) {
     if (!isSensorOpen(sensorId)) return;
     const isRealtimeMode = mapState.currentProvider.value === "realtime";
 
+    // Avoid re-fetching the same logs due to UI-only re-renders (e.g. tab switches).
+    // Keyed by sensor + provider + timeline mode + selected date.
+    const requestedKey = `${String(sensorId)}-${mapState.currentProvider.value}-${
+      mapState.timelineMode.value
+    }-${mapState.currentDate.value}`;
+    // Only dedupe while a request is actually running.
+    if (logsRequestInFlight && currentLogsKey === requestedKey) return;
+
     // В realtime onRealtimePoint может дергать updateSensorLogs на каждую входящую точку.
     // Если API отвечает медленно, предыдущий запрос постоянно abort-ится следующим,
     // и logs остаются в состоянии null (вечный skeleton). Поэтому допускаем только один
@@ -283,6 +293,7 @@ export function useSensors(localeComputed) {
     // Логи обновляются только при смене даты/периода (через clearSensorLogs)
     if (mapState.currentProvider.value === "remote") {
       const currentLogs = sensorPoint.value?.logs;
+      const loadedKey = sensorPoint.value?._logsKey || null;
       if (Array.isArray(currentLogs)) {
         // Логи уже загружены для remote - не делаем повторный запрос
         resetLogsProgress();
@@ -303,6 +314,10 @@ export function useSensors(localeComputed) {
             timelineMode: mapState.timelineMode.value,
           });
         }
+        return;
+      }
+      // If logs were loaded before for this exact context, don't refetch (even if empty).
+      if (loadedKey && loadedKey === requestedKey && Array.isArray(currentLogs)) {
         return;
       }
     }
@@ -343,14 +358,19 @@ export function useSensors(localeComputed) {
 
       currentLogsRequestId = Math.random().toString(36);
       const requestId = currentLogsRequestId;
+      currentLogsKey = requestedKey;
+      logsRequestInFlight = true;
 
       // Создаем новый AbortController для этого запроса
       currentLogsAbortController = new AbortController();
 
       // Загружаем логи через API с поддержкой отмены и кэшированием
       // НЕ инициализируем logArray как [], чтобы не создавать промежуточное состояние
+      // Progress updates should be tied to the REQUEST mode, not the live UI mode,
+      // otherwise quick switches can cause updates to be ignored and the bar to "freeze".
+      const progressMode = timelineMode;
       const handleProgressUpdate = (payload) => {
-        if (!["week", "month"].includes(mapState.timelineMode.value)) return;
+        if (!["week", "month"].includes(progressMode)) return;
         const current = logsProgress.value;
         const totalDays = payload.totalDays ?? current.totalDays;
         const loadedDays = payload.loadedDays ?? current.loadedDays;
@@ -367,7 +387,7 @@ export function useSensors(localeComputed) {
           loadedDays,
           missingDays,
           percent,
-          mode: mapState.timelineMode.value,
+          mode: progressMode,
         };
       };
 
@@ -411,6 +431,7 @@ export function useSensors(localeComputed) {
         sensorPoint.value = {
           ...sensorPoint.value,
           logs: cleanLogs,
+          _logsKey: requestedKey,
           ...(ownerSensorsWithData !== null ? { ownerSensorsWithData } : null),
         };
 
@@ -461,6 +482,7 @@ export function useSensors(localeComputed) {
         mode: mapState.timelineMode.value,
       };
     } finally {
+      logsRequestInFlight = false;
       if (isRealtimeMode) {
         realtimeLogsLoadInFlight = false;
       }
@@ -500,11 +522,7 @@ export function useSensors(localeComputed) {
     // don't reopen it from stale async updates.
     // Map marker clicks pass `fromMapClick: true` so a stale `sensor=` in URL
     // (e.g. after switching device in select) does not block opening the clicked marker.
-    if (
-      !options.fromMapClick &&
-      route.query.sensor &&
-      route.query.sensor !== point.sensor_id
-    ) {
+    if (!options.fromMapClick && route.query.sensor && route.query.sensor !== point.sensor_id) {
       return;
     }
 
@@ -726,10 +744,7 @@ export function useSensors(localeComputed) {
     const CONCURRENCY = 20;
 
     const computeMaxCo2FromMeta = (meta) => {
-      const data =
-        meta?.data && typeof meta.data === "object"
-          ? meta.data
-          : null;
+      const data = meta?.data && typeof meta.data === "object" ? meta.data : null;
 
       if (!data) return null;
 
@@ -758,11 +773,7 @@ export function useSensors(localeComputed) {
       const existing = sensor?.maxdata?.co2;
 
       // already hydrated
-      if (
-        existing !== null &&
-        existing !== undefined &&
-        Number.isFinite(Number(existing))
-      ) {
+      if (existing !== null && existing !== undefined && Number.isFinite(Number(existing))) {
         return false;
       }
 
@@ -804,18 +815,9 @@ export function useSensors(localeComputed) {
       });
     }
 
-    const work = async ({
-      owner,
-      representativeSensorId,
-      sensors: ownerSensors,
-    }) => {
+    const work = async ({ owner, representativeSensorId, sensors: ownerSensors }) => {
       try {
-
-        const meta = await preloadSensorMeta(
-          representativeSensorId,
-          start,
-          end
-        );
+        const meta = await preloadSensorMeta(representativeSensorId, start, end);
 
         const maxCo2 = computeMaxCo2FromMeta(meta);
 
@@ -829,42 +831,31 @@ export function useSensors(localeComputed) {
           updateSensorMarker(sensor);
         }
       } catch (e) {
-        console.error(
-          "hydrateCo2MaxFromOwnerBundle",
-          owner,
-          representativeSensorId,
-          e
-        );
+        console.error("hydrateCo2MaxFromOwnerBundle", owner, representativeSensorId, e);
       }
     };
 
     /**
      * Concurrent workers
      */
-    const runners = Array.from(
-      { length: Math.min(CONCURRENCY, queue.length) },
-      async () => {
-        while (queue.length > 0) {
-          const item = queue.shift();
+    const runners = Array.from({ length: Math.min(CONCURRENCY, queue.length) }, async () => {
+      while (queue.length > 0) {
+        const item = queue.shift();
 
-          if (!item) break;
+        if (!item) break;
 
-          // stop if user switched context
-          if (
-            mapState.currentUnit.value !== "co2" ||
-            mapState.currentProvider.value !== "remote"
-          ) {
-            return;
-          }
-
-          await work(item);
+        // stop if user switched context
+        if (mapState.currentUnit.value !== "co2" || mapState.currentProvider.value !== "remote") {
+          return;
         }
+
+        await work(item);
       }
-    );
+    });
 
     await Promise.allSettled(runners);
   };
-  
+
   /**
    * Обновляет один маркер на карте с правильным цветом и данными
    * @param {Object} point - Данные сенсора для маркера
@@ -888,7 +879,7 @@ export function useSensors(localeComputed) {
     const { mode, sensors: configSensors } = excluded_sensors;
     const sensorIdsSet = new Set(configSensors);
 
-    if (mode === 'include-only') {
+    if (mode === "include-only") {
       // Whitelist: скрываем сенсоры, которых нет в списке
       return !sensorIdsSet.has(sensorId);
     } else {
