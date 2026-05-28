@@ -12,6 +12,7 @@ import no2 from "./no2";
 import noise from "./noise";
 import noiseavg from "./noiseavg";
 import noisemax from "./noisemax";
+import o3 from "./o3";
 import pm1 from "./pm1";
 import pm10 from "./pm10";
 import pm25 from "./pm25";
@@ -40,6 +41,7 @@ export default {
   noise,
   noiseavg,
   noisemax,
+  o3,
   pm1,
   pm10,
   pm25,
