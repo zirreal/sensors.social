@@ -182,8 +182,30 @@ const ICON_ID_BY_CODE = {
   o: "note",
 };
 
+/** True when a backend/list row has content worth caching (not `{ result: null }` wrappers). */
+export function isMeaningfulStoryRecord(record) {
+  if (!record || typeof record !== "object" || Array.isArray(record)) return false;
+  const message = String(record.message || record.comment || "").trim();
+  const ts = record.timestamp != null ? Number(record.timestamp) : null;
+  const hasTs = ts != null && !Number.isNaN(ts);
+  return message.length > 0 || hasTs;
+}
+
+/** Unwrap Roseman `{ result }` / `{ story }` payloads without treating the wrapper as a story. */
+export function unwrapBackendStoryPayload(raw) {
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return null;
+  const nested = raw.result ?? raw.story;
+  if (nested != null) {
+    if (typeof nested !== "object" || Array.isArray(nested)) return null;
+    return nested;
+  }
+  if (isMeaningfulStoryRecord(raw)) return raw;
+  return null;
+}
+
 export function normalizeBackendStory(record) {
   if (!record || typeof record !== "object") return null;
+  if (!isMeaningfulStoryRecord(record)) return null;
 
   // Backend fields are not stable yet (sometimes compact codes are used, sometimes verbose),
   // so we normalize everything into the same local “story” shape used across the app.
@@ -316,6 +338,8 @@ export function useStories() {
     readSeenSet,
     writeSeenSet,
     fetchStoryList,
+    isMeaningfulStoryRecord,
+    unwrapBackendStoryPayload,
     normalizeBackendStory,
     HIDDEN_FEED_STORIES,
     isStoryHidden,

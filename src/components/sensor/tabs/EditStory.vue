@@ -149,6 +149,7 @@ import {
   isStoryHidden,
   preferredUnitByStoryIcon,
   normalizeBackendStory,
+  unwrapBackendStoryPayload,
   upsertStory,
 } from "@/composables/useStories";
 
@@ -388,49 +389,33 @@ async function refreshBackendStory() {
   if (!sid) return;
   try {
     const raw = await fetchLastStoryFromBackend(sid);
-    const record = raw?.result || raw?.story || raw;
+    const record = unwrapBackendStoryPayload(raw);
     if (!record) return;
 
-    const backendAuthor = record?.author || record?.owner || "";
-    const message = record?.message || record?.comment || "";
-    const recordTs =
-      record?.timestamp != null && !Number.isNaN(Number(record.timestamp))
-        ? Number(record.timestamp)
-        : null;
-    const createdAt =
-      record?.createdAt ||
-      record?.created_at ||
-      (recordTs ? new Date(recordTs).toISOString() : null) ||
-      null;
+    const normalized = normalizeBackendStory({
+      ...record,
+      sensor_id: record.sensor_id || record.sensorId || sid,
+    });
+    if (!normalized) return;
 
-    const date = record?.d || record?.date || "";
-    const rawIcon = record?.i || record?.icon || record?.iconId || record?.icon_id || "note";
-    const iconId = ICON_ID_BY_CODE[rawIcon] || rawIcon;
-    const iconObj = STORY_ICONS.find((i) => i.id === iconId) || STORY_ICONS[STORY_ICONS.length - 1];
-
-    const backendKey =
-      (record?.id ? `id:${record.id}` : "") ||
-      (recordTs && backendAuthor ? `bk:${backendAuthor}:${sid}:${recordTs}` : "") ||
-      (recordTs ? `ts:${recordTs}` : "") ||
-      `fp:${sid}|${String(createdAt || "").slice(0, 19)}|${iconObj.id}|${String(message).slice(
-        0,
-        64
-      )}`;
+    const iconObj =
+      STORY_ICONS.find((i) => i.id === normalized.iconId) || STORY_ICONS[STORY_ICONS.length - 1];
 
     const backendStory = {
-      id: backendKey,
-      backendKey,
+      id: normalized.id,
+      backendKey: normalized.backendKey,
       sensorId: sid,
-      owner: backendAuthor || ownerAddress.value,
+      owner: normalized.owner || ownerAddress.value,
       geo: props.geo ? { lat: props.geo.lat, lng: props.geo.lng } : null,
-      date,
-      timestamp: recordTs,
-      message,
-      comment: message,
+      date: normalized.date || "",
+      timestamp: normalized.timestamp,
+      message: normalized.message || "",
+      comment: normalized.message || "",
       iconId: iconObj.id,
       iconTitle: iconObj.title,
       icon: iconObj.icon,
-      createdAt: createdAt || new Date().toISOString(),
+      createdAt: normalized.createdAt,
+      test: false,
       source: "backend",
     };
 
