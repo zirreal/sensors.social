@@ -50,15 +50,81 @@ export function logSamplesHaveCo2(samples) {
   return false;
 }
 
+export function parseBundleSensorEntry(entry) {
+  if (entry == null) return null;
+  if (typeof entry === "string" || typeof entry === "number") {
+    const sensor_id = String(entry).trim();
+    return sensor_id ? { sensor_id, device_model: null } : null;
+  }
+  if (typeof entry === "object") {
+    const sensor_id = String(entry.sensor_id || entry.id || "").trim();
+    if (!sensor_id) return null;
+    const dm = entry.device_model ?? entry.model ?? null;
+    return {
+      sensor_id,
+      device_model: dm != null ? String(dm).toLowerCase() : null,
+    };
+  }
+  return null;
+}
+
+export function sensorTypeFromDeviceModel(deviceModel, logSamples = null) {
+  const m = String(deviceModel || "").toLowerCase();
+  if (m === "insight") return "insight";
+  if (m === "urban") return "urban";
+  if (m === "altruist") return "altruist";
+  if (Array.isArray(logSamples) && logSamples.length > 0) {
+    return classifySensorTypeFromLogSamples(logSamples);
+  }
+  return null;
+}
+
 /**
- * Map marker for an owner geo cluster: prefer Urban (no CO₂), then latest timestamp.
+ * Normalized bundle devices from v2 `sensor.sensors` (supports legacy string[] too).
+ */
+export function listBundleSensorEntries(meta) {
+  const data = meta?.data && typeof meta.data === "object" ? meta.data : {};
+  const owner = String(meta?.owner || "").trim();
+  const raw = Array.isArray(meta?.sensors) ? meta.sensors : [];
+  const entries = raw.map(parseBundleSensorEntry).filter(Boolean);
+
+  const fromList =
+    entries.length > 0
+      ? entries
+      : Object.keys(data).map((sensor_id) => ({ sensor_id, device_model: null }));
+
+  return fromList.filter(({ sensor_id, device_model }) => {
+    const sid = String(sensor_id);
+    const points = data[sid];
+    const hasData = Array.isArray(points) && points.length > 0;
+    const hasModel = !!device_model;
+    if (!hasData && !hasModel) return false;
+    if (owner && sid === owner && !hasModel) return false;
+    return true;
+  });
+}
+
+export function listBundleSensorIds(meta) {
+  return listBundleSensorEntries(meta).map((e) => e.sensor_id);
+}
+
+/** Device role for map rep — never use maxdata.co2 (hydrated from Insight siblings). */
+export function isInsightMapDevice(sensor) {
+  const dm = String(sensor?.device_model || "").toLowerCase();
+  if (dm === "insight") return true;
+  if (dm === "urban" || dm === "altruist") return false;
+  const liveCo2 = Number(sensor?.data?.co2);
+  return Number.isFinite(liveCo2);
+}
+
+/**
+ * Map marker for an owner geo cluster: prefer Urban, then latest timestamp.
  */
 export function pickOwnerClusterRepresentative(members) {
   if (!Array.isArray(members) || members.length === 0) return null;
 
   const ranked = members.map((m) => {
-    const co2 = Number(m?.data?.co2 ?? m?.maxdata?.co2);
-    const isInsight = Number.isFinite(co2);
+    const isInsight = isInsightMapDevice(m);
     const ts = Number(m?.timestamp || 0);
     return { m, isInsight, ts };
   });
@@ -114,6 +180,72 @@ export function dedupeSensorsForMap(list, maxKm = OWNER_GEO_CLUSTER_KM) {
 
 function dedupeByOwnerProximity(list, maxKm = OWNER_GEO_CLUSTER_KM) {
   return dedupeSensorsForMap(list, maxKm);
+}
+
+/** Same threshold as map marker drawing (near-null island coords). */
+export const MAP_COORDINATE_TOLERANCE = 0.001;
+
+/**
+ * Count map dots for a sensor list: valid geo + owner bundling (5 km).
+ * Matches `rebundleOwnerMarkers` / `dedupeSensorsForMap`, not raw device rows.
+ */
+function filterDrawableMapSensors(list, { shouldInclude = () => true } = {}) {
+  return (Array.isArray(list) ? list : []).filter((s) => {
+    const sid = s?.sensor_id ? String(s.sensor_id) : "";
+    if (!sid || !shouldInclude(sid)) return false;
+    const lat = Number(s.geo?.lat);
+    const lng = Number(s.geo?.lng);
+    return (
+      Math.abs(lat) >= MAP_COORDINATE_TOLERANCE || Math.abs(lng) >= MAP_COORDINATE_TOLERANCE
+    );
+  });
+}
+
+export function countMapMarkersFromList(list, opts = {}) {
+  return dedupeSensorsForMap(filterDrawableMapSensors(list, opts)).length;
+}
+
+/**
+ * Realtime badge: owner-bundled map dots that received pubsub in this session.
+ * A cluster counts once any sibling goes live; gap vs daily recap = not publishing now.
+ */
+export function countLiveRealtimeMapMarkers(list, liveIds, opts = {}) {
+  const liveSet = new Set(
+    (liveIds instanceof Set ? [...liveIds] : Array.isArray(liveIds) ? liveIds : [])
+      .map((id) => String(id || ""))
+      .filter(Boolean)
+  );
+  if (liveSet.size === 0) return 0;
+
+  const drawable = filterDrawableMapSensors(list, opts);
+  const liveSensors = drawable.filter((s) => liveSet.has(String(s.sensor_id)));
+  if (liveSensors.length === 0) return 0;
+
+  const pool = [];
+  const seen = new Set();
+
+  const push = (s) => {
+    const sid = String(s?.sensor_id || "");
+    if (!sid || seen.has(sid)) return;
+    seen.add(sid);
+    pool.push(s);
+  };
+
+  for (const live of liveSensors) {
+    push(live);
+    const owner = normalizeOwnerKey(live);
+    if (!owner || !hasValidCoordinates(live?.geo)) continue;
+
+    for (const s of drawable) {
+      const sid = String(s.sensor_id);
+      if (seen.has(sid) || normalizeOwnerKey(s) !== owner) continue;
+      if (!hasValidCoordinates(s?.geo)) continue;
+      if (haversineKm(live.geo, s.geo) > OWNER_GEO_CLUSTER_KM) continue;
+      push(s);
+    }
+  }
+
+  return dedupeSensorsForMap(pool).length;
 }
 
 // Импортируем утилиты для работы с IndexedDB
@@ -344,6 +476,67 @@ function geoFromLogPoints(points) {
   if (!geo || !hasValidCoordinates(geo)) return null;
   return geo;
 }
+
+/** Index v2 bundle meta under every device id in the owner bundle. */
+function cacheSensorMetaForBundle(requestedId, meta) {
+  if (!meta || typeof meta !== "object") return;
+  const req = requestedId ? String(requestedId) : "";
+  if (req) latestSensorMetaById.set(req, meta);
+  for (const { sensor_id } of listBundleSensorEntries(meta)) {
+    if (sensor_id) latestSensorMetaById.set(String(sensor_id), meta);
+  }
+}
+
+export function getCachedSensorMeta(sensorId) {
+  if (!sensorId) return null;
+  return latestSensorMetaById.get(String(sensorId)) || null;
+}
+
+/**
+ * Max CO₂ for a map marker from v2 bundle meta (own logs + nearby Insight siblings).
+ */
+export function computeMaxCo2FromMeta(meta, sensorId, sensorGeo, maxKm = OWNER_GEO_CLUSTER_KM) {
+  const data = meta?.data && typeof meta.data === "object" ? meta.data : null;
+  if (!data) return null;
+
+  const baseLat = Number(sensorGeo?.lat);
+  const baseLng = Number(sensorGeo?.lng);
+  const hasBaseGeo = Number.isFinite(baseLat) && Number.isFinite(baseLng);
+
+  const considerPoints = (points, requireNearby) => {
+    if (!Array.isArray(points)) return null;
+    let max = null;
+    for (const item of points) {
+      const n = Number(item?.data?.co2);
+      if (!Number.isFinite(n)) continue;
+      if (requireNearby && hasBaseGeo) {
+        const geo = item?.geo;
+        if (!geo || haversineKm({ lat: baseLat, lng: baseLng }, geo) > maxKm) {
+          continue;
+        }
+      }
+      if (max === null || n > max) max = n;
+    }
+    return max;
+  };
+
+  const sid = String(sensorId || "");
+  let max = considerPoints(data[sid], false);
+
+  for (const { sensor_id } of listBundleSensorEntries(meta)) {
+    const id = String(sensor_id);
+    if (id === sid) continue;
+    if (!hasBaseGeo) continue;
+    const siblingPoints = data[id];
+    if (!logSamplesHaveCo2(siblingPoints)) continue;
+    const siblingMax = considerPoints(siblingPoints, true);
+    if (siblingMax !== null && (max === null || siblingMax > max)) {
+      max = siblingMax;
+    }
+  }
+
+  return max;
+}
 /**
  * Keep only owner-bundle siblings within `maxKm` of the anchor. Never widen to other cities.
  */
@@ -362,33 +555,38 @@ export function filterOwnerBundleNearAnchor(items, anchorGeo, activeSensorId, ma
 }
 
 export function getOwnerSensorsWithData(sensorId, anchorGeoOverride = null) {
-  if (!sensorId) return [];
-  const meta = latestSensorMetaById.get(sensorId);
+  if (!sensorId) return null;
+  const meta = getCachedSensorMeta(sensorId);
   // Meta may not be loaded yet (async preload). Return null so callers can
   // keep previous UI options instead of overwriting with an empty list.
   if (!meta) return null;
-  const sensors = Array.isArray(meta?.sensors) ? meta.sensors : [];
   const data = meta?.data && typeof meta.data === "object" ? meta.data : {};
   const sid = String(sensorId);
-
-  const mapped = sensors.map((id) => {
-    const points = Array.isArray(data?.[id]) ? data[id] : [];
-    const hasData = points.length > 0;
-    const geo = geoFromLogPoints(points);
-    return {
-      id,
-      hasData,
-      type: hasData ? classifySensorTypeFromLogSamples(points) : null,
-      geo,
-    };
-  });
 
   const anchorGeo =
     (anchorGeoOverride && hasValidCoordinates(anchorGeoOverride) ? anchorGeoOverride : null) ||
     geoFromLogPoints(data?.[sid]) ||
     null;
 
-  return filterOwnerBundleNearAnchor(mapped, anchorGeo, sid);
+  const mapped = listBundleSensorEntries(meta).map(({ sensor_id, device_model }) => {
+    const id = String(sensor_id);
+    const points = Array.isArray(data[id]) ? data[id] : [];
+    const hasData = points.length > 0;
+    let geo = geoFromLogPoints(points);
+    if (hasData && (!geo || !hasValidCoordinates(geo)) && anchorGeo) {
+      geo = anchorGeo;
+    }
+    return {
+      id,
+      hasData,
+      type: hasData ? sensorTypeFromDeviceModel(device_model, points) : null,
+      geo,
+      device_model: device_model || null,
+    };
+  });
+
+  const filtered = filterOwnerBundleNearAnchor(mapped, anchorGeo, sid);
+  return filtered.length > 0 ? filtered : null;
 }
 
 /**
@@ -403,7 +601,7 @@ export async function preloadSensorMeta(sensorId, startTimestamp, endTimestamp, 
       { cache: "no-store", signal }
     );
     if (payload?.sensor && typeof payload.sensor === "object") {
-      latestSensorMetaById.set(sensorId, payload.sensor);
+      cacheSensorMetaForBundle(sensorId, payload.sensor);
       return payload.sensor;
     }
     return null;
@@ -471,7 +669,7 @@ export async function getSensorData(
         { cache: "no-store", signal }
       );
       if (payload?.sensor && typeof payload.sensor === "object") {
-        latestSensorMetaById.set(sensorId, payload.sensor);
+        cacheSensorMetaForBundle(sensorId, payload.sensor);
       }
       const historyData = payload?.result;
       // Если данных нет, возвращаем [] (загружено, но пусто), если null/undefined - null (не загружено)

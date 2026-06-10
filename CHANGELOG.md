@@ -1,3 +1,24 @@
+v4.0.5
+
+**Owner bundling (map & popup):**
+
+- Feat: Bundle multiple devices from the same owner into **one map marker** when they are within **5 km** (Urban + Insight, etc.)
+- Feat: Prefer **Urban** as the map representative for a cluster; **Insight** data is used for CO₂ coloring and max values on bundled markers
+- Feat: Owner device selector in the sensor popup lists **all bundle siblings with data** near the active cluster (with `device_model` labels)
+- Feat: Hide sensors **without log data** from the owner selector
+
+**Header sensor counter:**
+
+- Feat: Counter reflects **owner-bundled map dots**, not raw device rows
+- Feat: **Daily recap** — everyone who reported at least once today (remote API)
+- Feat: **Realtime** — live badge for clusters that **published on pubsub this session**; count grows as the network wakes up
+- Feat: Realtime map is **seeded from today’s API** for fast markers; the badge tracks live pubsub separately
+
+**Bug fixes:**
+
+- Fix: Duplicate map dots when switching **Day ↔ Realtime** or **Urban ↔ Insight**
+- Fix: **CO₂** map colors for bundled Urban markers (hydrate from Insight sibling in owner bundle)
+
 v4.0.4
 
 **Stories (new):**

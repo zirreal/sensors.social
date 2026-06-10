@@ -7,13 +7,13 @@
         </router-link>
         <!-- Если есть sensorsNoLocation - показываем details с полным содержимым -->
         <details
-          v-if="sensorsList?.length > 0 && sensorsNoLocation?.length > 0"
+          v-if="mapSensorsCountDisplay > 0 && mapNoLocationCount > 0"
           tabindex="0"
           class="sensors details-popup"
         >
           <summary class="sensors-counter">
             <IconSensor class="sensors-mainicon" />
-            {{ sensorsList?.length + sensorsNoLocation?.length }}
+            {{ mapSensorsCountDisplay + mapNoLocationCount }}
           </summary>
           <div class="details-content nogeo">
             <section>
@@ -30,9 +30,9 @@
         </details>
 
         <!-- Если sensorsNoLocation пуст - показываем только div.sensors-counter -->
-        <div v-else-if="sensorsList?.length > 0" class="sensors-counter">
+        <div v-else-if="mapSensorsCountDisplay > 0" class="sensors-counter">
           <IconSensor class="sensors-mainicon" />
-          {{ sensorsList?.length }}
+          {{ mapSensorsCountDisplay }}
         </div>
       </div>
 
@@ -176,6 +176,7 @@ import { useRoute, useRouter } from "vue-router";
 import { useMap } from "@/composables/useMap";
 import { useBookmarks } from "@/composables/useBookmarks";
 import { useSensors } from "@/composables/useSensors";
+import { dedupeSensorsForMap } from "@/utils/map/sensors/requests";
 
 import IconSensor from "../icons/Sensor.vue";
 import ReleaseInfo from "../ReleaseInfo.vue";
@@ -221,8 +222,15 @@ const filterSensors = (sensors) => {
   }
 };
 
-const sensorsList = computed(() => filterSensors(sensorsData.sensors));
 const sensorsNoLocation = computed(() => filterSensors(sensorsData.sensorsNoLocation));
+
+/** No-geo rows in the counter total (owner-deduped). */
+const mapNoLocationCount = computed(() =>
+  dedupeSensorsForMap(sensorsNoLocation.value || []).length
+);
+
+/** Always owner-bundled map dots (single source: useSensors). */
+const mapSensorsCountDisplay = computed(() => sensorsData.mapSensorsCount ?? 0);
 
 // Количество закладок
 const bookmarksCount = computed(() => idbBookmarks.value?.length || 0);

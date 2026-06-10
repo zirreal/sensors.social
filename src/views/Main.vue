@@ -134,7 +134,6 @@ const onRealtimePoint = async (point) => {
     timestamp: point.timestamp,
   });
 
-  // Обновляем маркер сенсора
   sensorsUI.updateSensorMarker(point);
 
   // Popup chart/logs: only while realtime tab is active (day/week use remote API logs).
@@ -344,8 +343,8 @@ watch(
         await sensorsUI.updateSensorMaxData();
       } else {
         sensorsUI.updateSensorMarkers(false);
+        sensorsUI.refreshOpenSensorMapMarker();
       }
-      sensorsUI.refreshOpenSensorMapMarker();
     }
 
     // Перезагружаем данные сенсоров при изменении даты (или timestamp-derived day), провайдера
@@ -394,7 +393,6 @@ watch(
 
         if (mapState.currentProvider.value === "remote") {
           await sensorsUI.updateSensorMaxData();
-          sensorsUI.updateSensorMarkers();
         } else {
           sensorsUI.updateSensorMarkers(false);
           const hydrateId =
