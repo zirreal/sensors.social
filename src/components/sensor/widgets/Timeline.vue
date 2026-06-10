@@ -307,9 +307,18 @@ const selectOwnerSensor = (id) => {
   });
   try {
     sensorsUI?.ensureOwnerLoaded?.(nextId);
-    if (mapState.currentProvider.value === "realtime") {
-      void sensorsUI?.hydrateOwnerBundleForRealtime?.(nextId);
-    }
+    const runBundleSync = async () => {
+      if (mapState.currentProvider.value === "realtime") {
+        await sensorsUI?.hydrateOwnerBundleForRealtime?.(nextId);
+      } else if (props.point?.owner && sensorsUI?.syncOwnerClusterMapMarker) {
+        sensorsUI.syncOwnerClusterMapMarker({
+          ...props.point,
+          sensor_id: nextId,
+          ownerSensorsWithData: props.point?.ownerSensorsWithData,
+        });
+      }
+    };
+    void runBundleSync();
   } catch {}
   closeOwnerDropdown();
 };

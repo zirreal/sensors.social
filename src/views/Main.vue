@@ -341,13 +341,11 @@ watch(
     // Обновляем maxdata и маркеры при изменении type (без date и provider, так как они обрабатываются через loadSensors)
     if (typeChanged) {
       if (mapState.currentProvider.value === "remote") {
-        // Для remote обновляем maxdata и маркеры
         await sensorsUI.updateSensorMaxData();
-        sensorsUI.updateSensorMarkers(false);
       } else {
-        // Для realtime просто обновляем цвета маркеров (данные уже приходят по мере поступления)
         sensorsUI.updateSensorMarkers(false);
       }
+      sensorsUI.refreshOpenSensorMapMarker();
     }
 
     // Перезагружаем данные сенсоров при изменении даты (или timestamp-derived day), провайдера

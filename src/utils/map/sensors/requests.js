@@ -135,13 +135,12 @@ import {
  * @returns {Array} обновленный массив сенсоров с maxdata
  */
 export async function getMaxData(start, end, unit, sensors) {
-  // Проверяем, есть ли уже данные для этого типа измерения
-  const hasExistingData = sensors.some(
-    (sensor) => sensor.maxdata && sensor.maxdata[unit] !== undefined
-  );
+  // Fetch unless every sensor already has maxdata for this unit.
+  const allHaveUnit =
+    sensors.length > 0 &&
+    sensors.every((sensor) => sensor?.maxdata && sensor.maxdata[unit] !== undefined);
 
-  if (hasExistingData) {
-    // Данные уже есть, возвращаем копию существующих сенсоров для реактивности
+  if (allHaveUnit) {
     return [...sensors];
   }
 
@@ -345,7 +344,24 @@ function geoFromLogPoints(points) {
   if (!geo || !hasValidCoordinates(geo)) return null;
   return geo;
 }
-export function getOwnerSensorsWithData(sensorId) {
+/**
+ * Keep only owner-bundle siblings within `maxKm` of the anchor. Never widen to other cities.
+ */
+export function filterOwnerBundleNearAnchor(items, anchorGeo, activeSensorId, maxKm = OWNER_GEO_CLUSTER_KM) {
+  const list = Array.isArray(items) ? items.filter(Boolean) : [];
+  const sid = activeSensorId ? String(activeSensorId) : "";
+  if (list.length === 0) return list;
+  if (!anchorGeo || !hasValidCoordinates(anchorGeo)) {
+    return sid ? list.filter((o) => String(o.id) === sid) : [];
+  }
+  return list.filter((o) => {
+    if (sid && String(o.id) === sid) return true;
+    if (!o.geo || !hasValidCoordinates(o.geo)) return false;
+    return haversineKm(anchorGeo, o.geo) <= maxKm;
+  });
+}
+
+export function getOwnerSensorsWithData(sensorId, anchorGeoOverride = null) {
   if (!sensorId) return [];
   const meta = latestSensorMetaById.get(sensorId);
   // Meta may not be loaded yet (async preload). Return null so callers can
@@ -353,6 +369,7 @@ export function getOwnerSensorsWithData(sensorId) {
   if (!meta) return null;
   const sensors = Array.isArray(meta?.sensors) ? meta.sensors : [];
   const data = meta?.data && typeof meta.data === "object" ? meta.data : {};
+  const sid = String(sensorId);
 
   const mapped = sensors.map((id) => {
     const points = Array.isArray(data?.[id]) ? data[id] : [];
@@ -367,18 +384,11 @@ export function getOwnerSensorsWithData(sensorId) {
   });
 
   const anchorGeo =
-    geoFromLogPoints(data?.[sensorId]) ||
-    mapped.map((o) => o.geo).find((g) => g) ||
+    (anchorGeoOverride && hasValidCoordinates(anchorGeoOverride) ? anchorGeoOverride : null) ||
+    geoFromLogPoints(data?.[sid]) ||
     null;
 
-  if (!anchorGeo) return mapped;
-
-  const clustered = mapped.filter((o) => {
-    if (!o.geo) return true;
-    return haversineKm(anchorGeo, o.geo) <= OWNER_GEO_CLUSTER_KM;
-  });
-
-  return clustered.length > 0 ? clustered : mapped;
+  return filterOwnerBundleNearAnchor(mapped, anchorGeo, sid);
 }
 
 /**
