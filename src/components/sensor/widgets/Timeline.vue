@@ -150,10 +150,17 @@ const ownerOptionType = (o) => {
   return "altruist";
 };
 
+const hasValidGeo = (geo) => {
+  if (!geo || geo.lat == null || geo.lng == null) return false;
+  const lat = Number(geo.lat);
+  const lng = Number(geo.lng);
+  return Number.isFinite(lat) && Number.isFinite(lng) && (Math.abs(lat) > 0.001 || Math.abs(lng) > 0.001);
+};
+
 const ownerSensorOptions = computed(() => {
   const list = props.point?.ownerSensorsWithData;
   const arr = Array.isArray(list) ? list.filter(Boolean) : [];
-  return arr.filter((o) => o.hasData === true);
+  return arr.filter((o) => o.hasData === true && hasValidGeo(o.geo));
 });
 
 const labeledOwnerOptions = computed(() => {
@@ -308,6 +315,7 @@ const selectOwnerSensor = (id) => {
   try {
     sensorsUI?.ensureOwnerLoaded?.(nextId);
     const runBundleSync = async () => {
+      if (!sensorsUI?.sensorPoint?.value) return;
       if (mapState.currentProvider.value === "realtime") {
         await sensorsUI?.hydrateOwnerBundleForRealtime?.(nextId);
       } else if (props.point?.owner && sensorsUI?.syncOwnerClusterMapMarker) {
@@ -317,7 +325,9 @@ const selectOwnerSensor = (id) => {
           ownerSensorsWithData: props.point?.ownerSensorsWithData,
         });
       }
-      sensorsUI?.refreshOpenSensorMapMarker?.();
+      if (sensorsUI?.sensorPoint?.value) {
+        sensorsUI?.refreshOpenSensorMapMarker?.();
+      }
     };
     void runBundleSync();
   } catch {}

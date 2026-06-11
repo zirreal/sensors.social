@@ -157,10 +157,13 @@ export function dedupeSensorsForMap(list, maxKm = OWNER_GEO_CLUSTER_KM) {
   for (const items of byOwner.values()) {
     const clusters = [];
     for (const item of items) {
+      if (!hasValidCoordinates(item?.geo)) continue;
       const geo = item.geo;
       let placed = false;
       for (const c of clusters) {
-        const closeEnough = c.members.some((m) => haversineKm(geo, m.geo) <= maxKm);
+        const closeEnough = c.members.some(
+          (m) => hasValidCoordinates(m?.geo) && haversineKm(geo, m.geo) <= maxKm
+        );
         if (closeEnough) {
           c.members.push(item);
           placed = true;
@@ -360,11 +363,86 @@ export async function getSensors(start, end, provider = "remote") {
     const ownerDedupedSensorsNoLocation = dedupeByOwnerProximity(filteredSensorsNoLocation);
 
     const bounds = getConfigBounds(settings);
+    const bounded = filterByBounds(ownerDedupedSensors, bounds);
+    const enriched = await enrichMapSensorsWithOwnerBundleDevices(bounded, start, end);
     return {
-      sensors: filterByBounds(ownerDedupedSensors, bounds),
+      sensors: enriched,
       sensorsNoLocation: filterByBounds(ownerDedupedSensorsNoLocation, bounds),
     };
   }
+}
+
+/**
+ * Daily recap map list is urban-only; merge Insight/Altruist siblings from owner v2 meta
+ * when they share a geo cluster with an urban row already on the map.
+ */
+export async function enrichMapSensorsWithOwnerBundleDevices(sensors, start, end) {
+  const list = Array.isArray(sensors) ? [...sensors] : [];
+  if (list.length === 0) return list;
+
+  const seen = new Set(list.map((s) => String(s?.sensor_id || "")));
+  const byOwner = new Map();
+  for (const s of list) {
+    const owner = normalizeOwnerKey(s);
+    if (!owner) continue;
+    if (!byOwner.has(owner)) byOwner.set(owner, []);
+    byOwner.get(owner).push(s);
+  }
+
+  const queue = [...byOwner.entries()];
+  if (queue.length === 0) return list;
+
+  const CONCURRENCY = 6;
+
+  const work = async ([owner, members]) => {
+    const seed = pickOwnerClusterRepresentative(members) || members[0];
+    if (!seed?.sensor_id) return;
+
+    try {
+      const meta = await preloadSensorMeta(seed.sensor_id, start, end);
+      const data = meta?.data;
+      if (!data || typeof data !== "object") return;
+
+      for (const { sensor_id, device_model } of listBundleSensorEntries(meta)) {
+        const id = String(sensor_id || "");
+        if (!id || seen.has(id)) continue;
+
+        const points = Array.isArray(data[id]) ? data[id] : [];
+        if (points.length === 0) continue;
+
+        const geo = geoFromLogPoints(points);
+        if (!hasValidCoordinates(geo)) continue;
+
+        const nearMember = members.some(
+          (m) =>
+            hasValidCoordinates(m?.geo) && haversineKm(m.geo, geo) <= OWNER_GEO_CLUSTER_KM
+        );
+        if (!nearMember) continue;
+
+        list.push({
+          sensor_id: id,
+          model: 2,
+          geo: { lat: Number(geo.lat), lng: Number(geo.lng) },
+          owner,
+          device_model: device_model || null,
+          timestamp: Number(points[points.length - 1]?.timestamp) || null,
+        });
+        seen.add(id);
+      }
+    } catch (e) {
+      console.warn("enrichMapSensorsWithOwnerBundleDevices", owner, e);
+    }
+  };
+
+  const runners = Array.from({ length: Math.min(CONCURRENCY, queue.length) }, async () => {
+    while (queue.length > 0) {
+      const item = queue.shift();
+      if (item) await work(item);
+    }
+  });
+  await Promise.allSettled(runners);
+
+  return dedupeByOwnerProximity(list);
 }
 
 /**
@@ -376,21 +454,42 @@ export async function getSensorMetaFromPeriod(sensorId, start, end) {
   const target = String(sensorId);
   try {
     const historyData = await REMOTE_PROVIDER.getSensorsForPeriod(start, end);
-    if (!Array.isArray(historyData)) return null;
-    const sensorData = historyData.find((s) => String(s?.sensor_id || "") === target);
-    if (!sensorData || !sensorData.sensor_id || !sensorData.geo) return null;
+    if (Array.isArray(historyData)) {
+      const sensorData = historyData.find((s) => String(s?.sensor_id || "") === target);
+      if (sensorData?.sensor_id && sensorData?.geo) {
+        const lat = parseFloat(sensorData.geo.lat);
+        const lng = parseFloat(sensorData.geo.lng);
+        if (hasValidCoordinates({ lat, lng })) {
+          return {
+            sensor_id: String(sensorData.sensor_id),
+            model: sensorData.model || 2,
+            geo: { lat, lng },
+            address: sensorData.address || null,
+            donated_by: sensorData.donated_by || null,
+            owner: normalizeOwnerKey(sensorData) || null,
+            timestamp: sensorData.timestamp || null,
+          };
+        }
+      }
+    }
 
-    const lat = parseFloat(sensorData.geo.lat);
-    const lng = parseFloat(sensorData.geo.lng);
+    const meta = await preloadSensorMeta(target, start, end);
+    if (!meta) return null;
+    const owner = normalizeOwnerKey(meta) || null;
+    const points = meta?.data?.[target];
+    const geo = geoFromLogPoints(points);
+    if (!hasValidCoordinates(geo)) return null;
 
+    const entry = listBundleSensorEntries(meta).find((e) => String(e.sensor_id) === target);
     return {
-      sensor_id: String(sensorData.sensor_id),
-      model: sensorData.model || 2,
-      geo: { lat, lng },
-      address: sensorData.address || null,
-      donated_by: sensorData.donated_by || null,
-      owner: normalizeOwnerKey(sensorData) || null,
-      timestamp: sensorData.timestamp || null,
+      sensor_id: target,
+      model: 2,
+      geo: { lat: Number(geo.lat), lng: Number(geo.lng) },
+      address: null,
+      donated_by: null,
+      owner,
+      device_model: entry?.device_model || null,
+      timestamp: Number(points?.[points.length - 1]?.timestamp) || null,
     };
   } catch (error) {
     console.warn("Failed to load sensor meta from period:", error);
@@ -542,16 +641,13 @@ export function computeMaxCo2FromMeta(meta, sensorId, sensorGeo, maxKm = OWNER_G
  */
 export function filterOwnerBundleNearAnchor(items, anchorGeo, activeSensorId, maxKm = OWNER_GEO_CLUSTER_KM) {
   const list = Array.isArray(items) ? items.filter(Boolean) : [];
-  const sid = activeSensorId ? String(activeSensorId) : "";
   if (list.length === 0) return list;
+
+  const withGeo = list.filter((o) => o?.geo && hasValidCoordinates(o.geo));
   if (!anchorGeo || !hasValidCoordinates(anchorGeo)) {
-    return sid ? list.filter((o) => String(o.id) === sid) : [];
+    return withGeo;
   }
-  return list.filter((o) => {
-    if (sid && String(o.id) === sid) return true;
-    if (!o.geo || !hasValidCoordinates(o.geo)) return false;
-    return haversineKm(anchorGeo, o.geo) <= maxKm;
-  });
+  return withGeo.filter((o) => haversineKm(anchorGeo, o.geo) <= maxKm);
 }
 
 export function getOwnerSensorsWithData(sensorId, anchorGeoOverride = null) {
@@ -572,15 +668,12 @@ export function getOwnerSensorsWithData(sensorId, anchorGeoOverride = null) {
     const id = String(sensor_id);
     const points = Array.isArray(data[id]) ? data[id] : [];
     const hasData = points.length > 0;
-    let geo = geoFromLogPoints(points);
-    if (hasData && (!geo || !hasValidCoordinates(geo)) && anchorGeo) {
-      geo = anchorGeo;
-    }
+    const geo = geoFromLogPoints(points);
     return {
       id,
-      hasData,
-      type: hasData ? sensorTypeFromDeviceModel(device_model, points) : null,
-      geo,
+      hasData: hasData && hasValidCoordinates(geo),
+      type: hasData && hasValidCoordinates(geo) ? sensorTypeFromDeviceModel(device_model, points) : null,
+      geo: hasValidCoordinates(geo) ? geo : null,
       device_model: device_model || null,
     };
   });

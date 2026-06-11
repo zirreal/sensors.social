@@ -142,17 +142,11 @@ function buildPubsubOwnerList(point, sensorsList, anchorGeo) {
   const geo = anchorGeo || point?.geo;
 
   if (!hasValidCoordinates(geo)) {
-    if (!sid) return null;
-    return [{ id: sid, hasData: true, type: null, geo: null }];
+    return null;
   }
 
   const list = Array.isArray(sensorsList) ? sensorsList : [];
   const ownerSensors = list.filter((s) => normalizeOwnerKey(s) === owner);
-
-  if (ownerSensors.length === 0) {
-    if (!sid) return null;
-    return [{ id: sid, hasData: true, type: null, geo }];
-  }
 
   const nearby = ownerSensors.filter(
     (s) => hasValidCoordinates(s?.geo) && haversineKm(geo, s.geo) <= OWNER_GEO_CLUSTER_KM
@@ -165,14 +159,16 @@ function buildPubsubOwnerList(point, sensorsList, anchorGeo) {
   }));
   if (sid && !arr.some((o) => String(o.id) === sid)) {
     const self = ownerSensors.find((s) => String(s?.sensor_id || "") === sid);
-    arr.unshift({
-      id: sid,
-      hasData: true,
-      type: deviceModelToSensorType(self?.device_model),
-      geo: hasValidCoordinates(self?.geo) ? self.geo : geo,
-    });
+    if (self && hasValidCoordinates(self?.geo)) {
+      arr.unshift({
+        id: sid,
+        hasData: true,
+        type: deviceModelToSensorType(self?.device_model),
+        geo: self.geo,
+      });
+    }
   }
-  return arr;
+  return arr.length > 0 ? arr : null;
 }
 
 function buildOwnerSensorsWithData(point, sensorsList) {
@@ -202,6 +198,71 @@ function applyFilteredOwnerBundleOptions(point, prevOptions, sensorsList) {
     anchorGeo,
     point.sensor_id
   );
+}
+
+/**
+ * Sensors in one owner geo cluster around the popup anchor (never the full nationwide owner list).
+ */
+function resolveOwnerClusterPool(point, sensorsList, ownerKey, anchorGeo) {
+  const list = (Array.isArray(sensorsList) ? sensorsList : []).filter(
+    (s) => normalizeOwnerKey(s) === ownerKey
+  );
+  const sid = String(point?.sensor_id || "");
+
+  if (!hasValidCoordinates(anchorGeo)) {
+    if (!sid) return list;
+    const row = list.find((s) => String(s?.sensor_id || "") === sid);
+    return row ? [row] : list;
+  }
+
+  const nearby = list.filter(
+    (s) => hasValidCoordinates(s?.geo) && haversineKm(anchorGeo, s.geo) <= OWNER_GEO_CLUSTER_KM
+  );
+  if (nearby.length > 0) return nearby;
+
+  if (!sid) return [];
+
+  const row = list.find((s) => String(s?.sensor_id || "") === sid);
+  if (row) {
+    return [hasValidCoordinates(row.geo) ? row : { ...row, geo: anchorGeo }];
+  }
+
+  return [
+    {
+      sensor_id: sid,
+      geo: anchorGeo,
+      owner: ownerKey,
+      model: point?.model || 2,
+      maxdata: point?.maxdata,
+      data: point?.data,
+      device_model: point?.device_model,
+      timestamp: point?.timestamp,
+    },
+  ];
+}
+
+/** Map-marker ids to clear in one anchor cluster — never cross-city bundle dropdown entries. */
+function markerIdsInAnchorCluster(pool, bundleOpts, anchorGeo, maxKm = OWNER_GEO_CLUSTER_KM) {
+  const ids = new Set();
+  for (const s of Array.isArray(pool) ? pool : []) {
+    const id = String(s?.sensor_id || "");
+    if (id) ids.add(id);
+  }
+  if (!Array.isArray(bundleOpts)) return ids;
+
+  for (const o of bundleOpts) {
+    const id = String(o?.id || "");
+    if (!id || o?.hasData === false) continue;
+    if (ids.has(id)) continue;
+
+    if (!hasValidCoordinates(anchorGeo)) {
+      ids.add(id);
+      continue;
+    }
+    if (!o.geo || !hasValidCoordinates(o.geo)) continue;
+    if (haversineKm(anchorGeo, o.geo) <= maxKm) ids.add(id);
+  }
+  return ids;
 }
 
 function popupPeriodBounds(timelineMode, currentDate) {
@@ -1401,10 +1462,13 @@ export function useSensors(localeComputed) {
   const clusterSensorsByOwnerProximity = (items, maxKm = OWNER_GEO_CLUSTER_KM) => {
     const clusters = [];
     for (const s of items) {
-      const geo = s?.geo;
+      if (!hasValidCoordinates(s?.geo)) continue;
+      const geo = s.geo;
       let placed = false;
       for (const c of clusters) {
-        const closeEnough = c.members.some((m) => haversineKm(geo, m?.geo) <= maxKm);
+        const closeEnough = c.members.some(
+          (m) => hasValidCoordinates(m?.geo) && haversineKm(geo, m.geo) <= maxKm
+        );
         if (closeEnough) {
           c.members.push(s);
           placed = true;
@@ -1450,32 +1514,23 @@ export function useSensors(localeComputed) {
    * Popup/map: exactly one marker for the active owner cluster (5 km anchor).
    * Clears orphan markers for bundle siblings (urban/insight) on select switches.
    */
-  const syncOwnerClusterMapMarker = (point) => {
+  const syncOwnerClusterMapMarker = (point, { requireOpenPopup = true } = {}) => {
     if (!point || !sensorsUtils.isReadyLayer()) return;
+    if (requireOpenPopup && !sensorPoint.value) return;
     const ownerKey = normalizeOwnerKey(point);
     if (!ownerKey) return;
 
     const anchorGeo = resolveBundleAnchorGeo(point, sensors.value);
-    const bundleOpts =
-      point.ownerSensorsWithData || buildOwnerSensorsWithData(point, sensors.value);
-    const bundleIds = new Set(
-      (Array.isArray(bundleOpts) ? bundleOpts : [])
-        .filter((o) => o?.hasData !== false && o?.id)
-        .map((o) => String(o.id))
+    const bundleOpts = applyFilteredOwnerBundleOptions(
+      point,
+      point.ownerSensorsWithData,
+      sensors.value
     );
 
-    let pool = (sensors.value || []).filter((s) => normalizeOwnerKey(s) === ownerKey);
-    if (hasValidCoordinates(anchorGeo)) {
-      const nearby = pool.filter(
-        (s) =>
-          !hasValidCoordinates(s?.geo) ||
-          haversineKm(anchorGeo, s.geo) <= OWNER_GEO_CLUSTER_KM
-      );
-      if (nearby.length > 0) pool = nearby;
-    }
-    if (pool.length === 0) return;
+    const clusterPool = resolveOwnerClusterPool(point, sensors.value, ownerKey, anchorGeo);
+    if (clusterPool.length === 0) return;
 
-    const rep = pickOwnerClusterRepresentative(pool);
+    const rep = pickOwnerClusterRepresentative(clusterPool);
     if (!rep?.sensor_id) return;
     const repId = String(rep.sensor_id);
 
@@ -1490,10 +1545,7 @@ export function useSensors(localeComputed) {
       sensorsUtils.upsertPoint(repPoint, mapState.currentUnit.value);
     }
 
-    const idsToClear = new Set([
-      ...bundleIds,
-      ...pool.map((s) => String(s?.sensor_id || "")),
-    ]);
+    const idsToClear = markerIdsInAnchorCluster(clusterPool, bundleOpts, anchorGeo);
     for (const id of idsToClear) {
       if (id && id !== repId) sensorsUtils.removeMarker(id);
     }
@@ -1568,7 +1620,7 @@ export function useSensors(localeComputed) {
       if (anchorGeo && hasValidCoordinates(anchorGeo)) {
         const nearby = items.filter(
           (s) =>
-            !hasValidCoordinates(s?.geo) ||
+            hasValidCoordinates(s?.geo) &&
             haversineKm(anchorGeo, s.geo) <= OWNER_GEO_CLUSTER_KM
         );
         if (nearby.length > 0) {
@@ -1705,6 +1757,9 @@ export function useSensors(localeComputed) {
 
     router.replace({ query: currentQuery });
 
+    // Popup sync only touches one anchor cluster; restore the full map on close.
+    lastUpdateKey = "";
+    rebundleOwnerMarkers();
     sensorsUtils.refreshClusters();
   };
 
@@ -1771,7 +1826,7 @@ export function useSensors(localeComputed) {
       const next = [...(sensors.value || [])];
       let added = false;
       for (const o of metaList) {
-        if (!o.hasData || !o.geo) continue;
+        if (!o.hasData || !hasValidCoordinates(o.geo)) continue;
         const id = String(o.id);
         if (next.some((s) => String(s?.sensor_id || "") === id)) continue;
         next.push(
