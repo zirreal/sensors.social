@@ -42,8 +42,10 @@ function upsertMarker(point, colors, sensor_id = null) {
     const ctx = getMapContext();
     const spiderfyOpen = Boolean(ctx?.markersLayer?.__spiderfyOpen);
 
-    // Проверяем, был ли маркер активным
-    const wasActive = existingMarker.getElement()?.classList.contains(MARKER_CLASSES.active);
+    const markerId = String(point.sensor_id || "");
+    const shouldStayActive =
+      ctx.activeSensorMarkerId === markerId ||
+      existingMarker.getElement()?.classList.contains(MARKER_CLASSES.active);
 
     // Update marker data first
     existingMarker.options.data = point;
@@ -82,11 +84,12 @@ function upsertMarker(point, colors, sensor_id = null) {
       existingMarker.setLatLng(new L.LatLng(coord[0], coord[1]));
     }
 
-    // Восстанавливаем активный класс если маркер был активным
-    if (wasActive) {
+    if (shouldStayActive) {
       const element = existingMarker.getElement();
       if (element) {
         element.classList.add(MARKER_CLASSES.active);
+        ctx.activeMarker = existingMarker;
+        ctx.activeSensorMarkerId = markerId;
       }
     }
 

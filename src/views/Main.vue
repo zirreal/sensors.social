@@ -343,8 +343,8 @@ watch(
         await sensorsUI.updateSensorMaxData();
       } else {
         sensorsUI.updateSensorMarkers(false);
-        sensorsUI.refreshOpenSensorMapMarker();
       }
+      sensorsUI.refreshOpenSensorMapMarker();
     }
 
     // Перезагружаем данные сенсоров при изменении даты (или timestamp-derived day), провайдера

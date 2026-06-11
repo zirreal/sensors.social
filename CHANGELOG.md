@@ -2,10 +2,11 @@ v4.0.5
 
 **Owner bundling (map & popup):**
 
-- Feat: Bundle multiple devices from the same owner into **one map marker** when they are within **5 km** (Urban + Insight, etc.)
-- Feat: Prefer **Urban** as the map representative for a cluster; **Insight** data is used for CO₂ coloring and max values on bundled markers
-- Feat: Owner device selector in the sensor popup lists **all bundle siblings with data** near the active cluster (with `device_model` labels)
-- Feat: Hide sensors **without log data** from the owner selector
+When one person runs several Altruist modules (e.g. **Urban** outdoors + **Insight** indoors) at the same place, the map used to show **two separate dots** for the same owner. Now those devices are **bundled into one dot** on the map if they are within **5 km** of each other — so two (or more) devices at home become **one marker**, not two. If the same owner has sensors in **different cities** (farther than 5 km), they still get **separate markers** — bundling is per location, not per owner globally.
+
+- Feat: **One map marker per owner cluster** (within 5 km) instead of one dot per device ID
+- Feat: The visible dot prefers **Urban** as the cluster representative; **Insight** readings are still used behind the scenes (e.g. **CO₂** color and max values on that single marker)
+- Feat: Clicking the bundled dot opens the popup as before; an **owner device selector** lists every sibling in the cluster that has data (Urban, Insight, etc.) so you can switch which device you are viewing
 
 **Header sensor counter:**
 

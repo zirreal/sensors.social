@@ -20,7 +20,7 @@ const latestSensorMetaById = new Map();
 const periodLogsCache = new Map();
 
 /** Max distance (km) between points of the same owner to share one map marker. */
-export const OWNER_GEO_CLUSTER_KM = 5;
+export const OWNER_GEO_CLUSTER_KM = 3;
 
 export function haversineKm(geoA, geoB) {
   const lat1 = Number(geoA?.lat);

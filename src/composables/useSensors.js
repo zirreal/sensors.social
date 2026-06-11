@@ -1093,20 +1093,64 @@ export function useSensors(localeComputed) {
    * @param {number} [point.timestamp] - Временная метка (для realtime провайдера)
    * @returns {Object} Объект с полями {value: number|null, isEmpty: boolean}
    */
-  const readMarkerUnitValue = (p) => {
-    const currentUnit = mapState.currentUnit.value;
-    if (mapState.currentProvider.value === "remote") {
-      const value = p?.maxdata?.[currentUnit];
-      if (value !== null && value !== undefined && !isNaN(Number(value))) {
-        return { value: Number(value), isEmpty: false };
-      }
-    } else {
-      const lastValue = p?.data?.[currentUnit];
-      if (lastValue !== null && lastValue !== undefined && !isNaN(Number(lastValue))) {
-        return { value: Number(lastValue), isEmpty: false };
+  const unitValueFromBag = (bag, unit) => {
+    if (!bag || unit == null) return null;
+    const u = String(unit).toLowerCase();
+    let raw = bag[u];
+    if (raw === undefined) {
+      for (const [k, v] of Object.entries(bag)) {
+        if (String(k).toLowerCase() === u) {
+          raw = v;
+          break;
+        }
       }
     }
+    if (raw === null || raw === undefined) return null;
+    const num = Number(raw);
+    if (!Number.isFinite(num)) return null;
+    if (PM_LOG_KEYS.includes(u) && num === -1) return null;
+    return num;
+  };
+
+  const readMarkerUnitValue = (p) => {
+    const currentUnit = mapState.currentUnit.value;
+    const bag =
+      mapState.currentProvider.value === "remote" ? p?.maxdata : p?.data;
+    const value = unitValueFromBag(bag, currentUnit);
+    if (value !== null) return { value, isEmpty: false };
     return { value: null, isEmpty: true };
+  };
+
+  const mergeSensorWithList = (p) => {
+    if (!p?.sensor_id) return p;
+    const row = sensors.value?.find(
+      (s) => String(s?.sensor_id || "") === String(p.sensor_id)
+    );
+    if (!row) return p;
+    return {
+      ...row,
+      ...p,
+      maxdata: { ...(row.maxdata || {}), ...(p.maxdata || {}) },
+      data: { ...(row.data || {}), ...(p.data || {}) },
+      logs: p.logs ?? row.logs,
+    };
+  };
+
+  const isOpenOwnerClusterRep = (point) => {
+    const open = sensorPoint.value;
+    if (!open?.sensor_id || !point?.sensor_id) return false;
+    const repId = resolveOwnerClusterMarkerId(open.sensor_id);
+    return String(point.sensor_id) === String(repId);
+  };
+
+  const maxFromLogs = (logs, unit) => {
+    if (!Array.isArray(logs) || logs.length === 0) return null;
+    let max = null;
+    for (const item of logs) {
+      const v = unitValueFromBag(item?.data, unit);
+      if (v !== null && (max === null || v > max)) max = v;
+    }
+    return max;
   };
 
   const maxValueInOwnerCluster = (point) => {
@@ -1157,16 +1201,16 @@ export function useSensors(localeComputed) {
     const direct = readMarkerUnitValue(point);
     if (!direct.isEmpty) return direct;
 
-    if (currentUnit === "co2") {
+    const openRep = isOpenOwnerClusterRep(point);
+
+    if (openRep || currentUnit === "co2") {
       const clusterMax = maxValueInOwnerCluster(point);
       if (clusterMax !== null) return { value: clusterMax, isEmpty: false };
     }
 
-    const open = sensorPoint.value;
-    if (!open?.sensor_id || !point?.sensor_id) return direct;
+    if (!openRep) return direct;
 
-    const repId = resolveOwnerClusterMarkerId(open.sensor_id);
-    if (String(point.sensor_id) !== String(repId)) return direct;
+    const open = mergeSensorWithList(sensorPoint.value);
 
     const fromPopup = readMarkerUnitValue(open);
     if (!fromPopup.isEmpty) return fromPopup;
@@ -1179,19 +1223,21 @@ export function useSensors(localeComputed) {
         if (hasValidCoordinates(anchorGeo) && hasValidCoordinates(s?.geo)) {
           if (haversineKm(anchorGeo, s.geo) > OWNER_GEO_CLUSTER_KM) continue;
         }
-        const fromSibling = readMarkerUnitValue(s);
+        const fromSibling = readMarkerUnitValue(mergeSensorWithList(s));
         if (!fromSibling.isEmpty) return fromSibling;
       }
     }
 
-    if (mapState.currentProvider.value === "remote" && Array.isArray(open.logs) && open.logs.length > 0) {
-      const currentUnit = mapState.currentUnit.value;
-      let max = null;
-      for (const item of open.logs) {
-        const v = Number(item?.data?.[currentUnit]);
-        if (Number.isFinite(v) && (max === null || v > max)) max = v;
+    const logMax = maxFromLogs(open.logs, currentUnit);
+    if (logMax !== null) return { value: logMax, isEmpty: false };
+
+    if (mapState.currentProvider.value === "remote" && currentUnit === "co2") {
+      const meta = getCachedSensorMeta(open.sensor_id);
+      if (meta) {
+        const geo = hasValidCoordinates(open.geo) ? open.geo : point.geo;
+        const v = computeMaxCo2FromMeta(meta, open.sensor_id, geo);
+        if (v !== null) return { value: v, isEmpty: false };
       }
-      if (max !== null) return { value: max, isEmpty: false };
     }
 
     return { value: null, isEmpty: true };
@@ -1454,6 +1500,10 @@ export function useSensors(localeComputed) {
 
     if (shouldFilterSensor(repId)) {
       sensorsUtils.removeMarker(repId);
+    }
+
+    if (isSensorOpen(point.sensor_id)) {
+      setActiveMarker(resolveOwnerClusterMarkerId(sensorPoint.value?.sensor_id || point.sensor_id));
     }
   };
 
@@ -1859,6 +1909,10 @@ export function useSensors(localeComputed) {
         sensorsUtils.refreshClusters();
       } catch (error) {
         console.warn("refreshClusters: Map context not ready yet");
+      }
+
+      if (sensorPoint.value?.sensor_id) {
+        setActiveMarker(resolveOwnerClusterMarkerId(sensorPoint.value.sensor_id));
       }
     } catch (error) {
       console.error("Error updating markers:", error);

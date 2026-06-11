@@ -364,6 +364,7 @@ export function initMapContext(mapInstance, cb, unit = null) {
     windLayer: null,
     markerClickHandler: (data) => cb(data),
     activeMarker: null,
+    activeSensorMarkerId: null,
     unit: unit,
   };
 

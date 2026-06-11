@@ -273,6 +273,7 @@ export function setActiveMarker(markerId, type = "sensor") {
   if (!markerId) return;
 
   const ctx = getMapContext();
+  ctx.activeSensorMarkerId = type === "sensor" ? String(markerId) : null;
 
   // Определяем слой и поле ID в зависимости от типа
   const layer = type === "message" ? ctx.messagesLayer : ctx.markersLayer;
@@ -315,42 +316,33 @@ export function setActiveMarker(markerId, type = "sensor") {
 export function applyActiveMarker(marker) {
   if (!marker) return;
 
-  const { activeMarker } = getMapContext();
+  const ctx = getMapContext();
+  const sameMarker = ctx.activeMarker === marker;
 
-  // Если маркер уже активен, ничего не делаем
-  if (activeMarker && activeMarker === marker) {
-    return;
+  if (!sameMarker) {
+    clearActiveMarker();
+
+    // Touch highlight для мобильных устройств (как при клике)
+    if (IS_TOUCH && marker._icon) {
+      marker._icon.classList.add(MARKER_CLASSES.tapHighlight);
+      setTimeout(() => marker._icon.classList.remove(MARKER_CLASSES.tapHighlight), 550);
+    }
   }
 
-  // Убираем активность с предыдущего маркера
-  clearActiveMarker();
-
-  // Touch highlight для мобильных устройств (как при клике)
-  if (IS_TOUCH && marker._icon) {
-    marker._icon.classList.add(MARKER_CLASSES.tapHighlight);
-    setTimeout(() => marker._icon.classList.remove(MARKER_CLASSES.tapHighlight), 550);
-  }
-
-  // Функция для применения активного класса
   const applyActiveClass = () => {
     const element = marker.getElement();
 
     if (element) {
       element.classList.add(MARKER_CLASSES.active);
-      // Обновляем активный маркер в контексте
-      const ctx = getMapContext();
       ctx.activeMarker = marker;
-    } else {
-      console.log("Element still not ready for marker:", marker);
+      const sid = marker.options?.data?.sensor_id;
+      if (sid) ctx.activeSensorMarkerId = String(sid);
     }
   };
 
-  // Проверяем, готов ли маркер к работе
   if (marker._icon && marker._icon.parentNode) {
-    // Маркер уже готов - применяем активный класс
     applyActiveClass();
   } else {
-    // Ждем события 'add' от Leaflet
     marker.once("add", applyActiveClass);
   }
 }
@@ -369,6 +361,7 @@ export function clearActiveMarker() {
     }
     ctx.activeMarker = null;
   }
+  ctx.activeSensorMarkerId = null;
 
   // Сбрасываем активную область карты
   if (ctx.map) {

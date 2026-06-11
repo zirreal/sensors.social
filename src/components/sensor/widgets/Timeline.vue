@@ -317,6 +317,7 @@ const selectOwnerSensor = (id) => {
           ownerSensorsWithData: props.point?.ownerSensorsWithData,
         });
       }
+      sensorsUI?.refreshOpenSensorMapMarker?.();
     };
     void runBundleSync();
   } catch {}
