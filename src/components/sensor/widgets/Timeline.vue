@@ -270,6 +270,7 @@ const displayOwnerOptions = computed(() => {
 });
 
 const ownerDropdownOpen = ref(false);
+let timelineMarkerGen = 0;
 
 const currentOwnerOption = computed(() => {
   const sid = currentSensorId.value || selectedOwnerSensorId.value;
@@ -326,8 +327,14 @@ const selectOwnerSensor = (id) => {
       if (!ownerKey || !sensorsUI?.syncOwnerClusterMapMarker) return;
 
       const anchorGeo =
+        sensorsUI.resolveBundleAnchorGeo?.(
+          {
+            sensor_id: nextId,
+            geo: props.point?.geo || sensorsUI.sensorPoint.value?.geo || nextRow?.geo,
+          },
+          sensorsList
+        ) ||
         props.point?.geo ||
-        nextRow?.geo ||
         sensorsUI.sensorPoint.value?.geo ||
         null;
       const nextPoint = {
@@ -341,9 +348,6 @@ const selectOwnerSensor = (id) => {
         ...nextPoint,
         ownerSensorsWithData: bundleOpts || props.point?.ownerSensorsWithData,
       });
-      if (sensorsUI?.sensorPoint?.value) {
-        sensorsUI?.refreshOpenSensorMapMarker?.();
-      }
     };
     void runBundleSync();
   } catch {}
@@ -394,7 +398,13 @@ const timelineMode = computed(() => state.timelineMode);
  * @param {string} mode - 'realtime', 'day', 'week', 'month'
  */
 const handleTimelineModeChange = (mode) => {
+  const markerGen = ++timelineMarkerGen;
   state.timelineMode = mode;
+
+  const rebundleMap = () => {
+    if (markerGen !== timelineMarkerGen) return;
+    sensorsUI?.reassertMapMarkers?.();
+  };
 
   // Обнуляем logs при переключении периодов для показа skeleton
   if (props.point?.sensor_id && sensorsUI) {
@@ -412,9 +422,10 @@ const handleTimelineModeChange = (mode) => {
       owner: activeOwner || undefined,
     });
     mapState.setTimelineMode("realtime", activeSensorId);
+    rebundleMap();
     if (activeSensorId) {
       void sensorsUI?.hydrateOwnerBundleForRealtime?.(activeSensorId).then(() => {
-        sensorsUI?.refreshOpenSensorMapMarker?.();
+        rebundleMap();
       });
     }
   } else {
@@ -424,9 +435,13 @@ const handleTimelineModeChange = (mode) => {
       owner: activeOwner || undefined,
     });
     mapState.setTimelineMode(mode, activeSensorId);
+    rebundleMap();
     if (activeSensorId) {
-      void sensorsUI.updateSensorLogs(activeSensorId).then(() => {
-        sensorsUI?.refreshOpenSensorMapMarker?.();
+      void sensorsUI.updateSensorLogs(activeSensorId).then((result) => {
+        if (!result?.ok || result.superseded) return;
+        if (markerGen !== timelineMarkerGen) return;
+        if (result.timelineMode && result.timelineMode !== mapState.timelineMode.value) return;
+        rebundleMap();
       });
     }
   }

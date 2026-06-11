@@ -422,18 +422,7 @@ watch(
   }
 );
 
-watch(
-  () => mapState.timelineMode.value,
-  async (newMode, oldMode) => {
-    if (!newMode || oldMode === undefined || newMode === oldMode) return;
-    if (mapState.currentProvider.value !== "remote") return;
-    if (!["day", "week", "month"].includes(newMode)) return;
-    const sid = sensor_id.value;
-    if (!sid || !sensorsUI.isSensorOpen(sid)) return;
-    sensorsUI.clearSensorLogs(sid);
-    await sensorsUI.updateSensorLogs(sid);
-  }
-);
+// Timeline mode log reload + map rebundle: owned by Timeline.vue handleTimelineModeChange.
 
 // URL обновление теперь происходит только в Main.vue
 // Здесь оставляем только UI-специфичную логику

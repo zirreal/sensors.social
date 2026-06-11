@@ -289,26 +289,39 @@ function resolveOwnerClusterPool(point, sensorsList, ownerKey, anchorGeo) {
 }
 
 /** Map-marker ids to clear in one anchor cluster — never cross-city bundle dropdown entries. */
-function markerIdsInAnchorCluster(pool, bundleOpts, anchorGeo, maxKm = OWNER_GEO_CLUSTER_KM) {
+function markerIdsInAnchorCluster(
+  pool,
+  bundleOpts,
+  anchorGeo,
+  ownerKey,
+  sensorsList,
+  maxKm = OWNER_GEO_CLUSTER_KM
+) {
   const ids = new Set();
   for (const s of Array.isArray(pool) ? pool : []) {
     const id = String(s?.sensor_id || "");
     if (id) ids.add(id);
   }
-  if (!Array.isArray(bundleOpts)) return ids;
 
-  for (const o of bundleOpts) {
-    const id = String(o?.id || "");
-    if (!id || o?.hasData === false) continue;
-    if (ids.has(id)) continue;
-
-    if (!hasValidCoordinates(anchorGeo)) {
+  // Anchor-scoped device select: drop every bundle sibling marker (opts are already near-anchor).
+  if (Array.isArray(bundleOpts)) {
+    for (const o of bundleOpts) {
+      const id = String(o?.id || "");
+      if (!id || o?.hasData === false) continue;
       ids.add(id);
-      continue;
     }
-    if (!o.geo || !hasValidCoordinates(o.geo)) continue;
-    if (haversineKm(anchorGeo, o.geo) <= maxKm) ids.add(id);
   }
+
+  // Full owner cluster near anchor — covers partial clusterPool during fast device switches.
+  if (ownerKey && hasValidCoordinates(anchorGeo)) {
+    for (const s of Array.isArray(sensorsList) ? sensorsList : []) {
+      if (normalizeOwnerKey(s) !== ownerKey) continue;
+      const id = String(s?.sensor_id || "");
+      if (!id || !hasValidCoordinates(s?.geo)) continue;
+      if (haversineKm(anchorGeo, s.geo) <= maxKm) ids.add(id);
+    }
+  }
+
   return ids;
 }
 
@@ -547,8 +560,18 @@ export function useSensors(localeComputed) {
    * @param {string} sensorId - ID сенсора для обновления логов
    * @throws {Error} При ошибке загрузки логов устанавливает пустой массив
    */
+  const logRequestResult = ({
+    ok = false,
+    superseded = false,
+    deduped = false,
+    requestId = null,
+    timelineMode = null,
+  } = {}) => ({ ok, superseded, deduped, requestId, timelineMode });
+
   const updateSensorLogs = async (sensorId) => {
-    if (!isSensorOpen(sensorId)) return;
+    if (!isSensorOpen(sensorId)) {
+      return logRequestResult({ superseded: true });
+    }
     const isRealtimeMode = mapState.currentProvider.value === "realtime";
 
     // Avoid re-fetching the same logs due to UI-only re-renders (e.g. tab switches).
@@ -557,20 +580,33 @@ export function useSensors(localeComputed) {
       mapState.timelineMode.value
     }-${mapState.currentDate.value}`;
     // Only dedupe while a request is actually running.
-    if (logsRequestInFlight && currentLogsKey === requestedKey) return;
+    if (logsRequestInFlight && currentLogsKey === requestedKey) {
+      return logRequestResult({
+        ok: true,
+        deduped: true,
+        requestId: currentLogsRequestId,
+        timelineMode: mapState.timelineMode.value,
+      });
+    }
 
     // В realtime onRealtimePoint может дергать updateSensorLogs на каждую входящую точку.
     // Если API отвечает медленно, предыдущий запрос постоянно abort-ится следующим,
     // и logs остаются в состоянии null (вечный skeleton). Поэтому допускаем только один
     // активный запрос логов одновременно в realtime.
-    if (isRealtimeMode && realtimeLogsLoadInFlight) return;
+    if (isRealtimeMode && realtimeLogsLoadInFlight) {
+      return logRequestResult({ superseded: true });
+    }
 
     // Realtime chart: pubsub appends logs.
     if (isRealtimeMode && mapState.timelineMode.value === "realtime") {
       const live = normalizeSensorLogs(sensorPoint.value?.logs);
       if (live.length > 0) {
         resetLogsProgress();
-        return;
+        return logRequestResult({
+          ok: true,
+          deduped: true,
+          timelineMode: mapState.timelineMode.value,
+        });
       }
     }
 
@@ -608,17 +644,29 @@ export function useSensors(localeComputed) {
             timelineMode: mapState.timelineMode.value,
           });
         }
-        return;
+        return logRequestResult({
+          ok: true,
+          deduped: true,
+          timelineMode: mapState.timelineMode.value,
+        });
       }
       // If logs were loaded before for this exact context, don't refetch (even if empty).
       if (loadedKey && loadedKey === requestedKey && Array.isArray(currentLogs)) {
-        return;
+        return logRequestResult({
+          ok: true,
+          deduped: true,
+          timelineMode: mapState.timelineMode.value,
+        });
       }
     }
+
+    let requestId = null;
+    let timelineModeAtRequest = mapState.timelineMode.value;
 
     try {
       // Определяем режим таймлайна и получаем соответствующие границы
       const timelineMode = mapState.timelineMode.value;
+      timelineModeAtRequest = timelineMode;
       let start, end;
 
       if (timelineMode === "day") {
@@ -651,7 +699,7 @@ export function useSensors(localeComputed) {
       }
 
       currentLogsRequestId = Math.random().toString(36);
-      const requestId = currentLogsRequestId;
+      requestId = currentLogsRequestId;
       currentLogsKey = requestedKey;
       logsRequestInFlight = true;
 
@@ -700,7 +748,11 @@ export function useSensors(localeComputed) {
       // Проверяем, не был ли запрос отменен
       if (currentLogsRequestId !== requestId) {
         resetLogsProgress();
-        return;
+        return logRequestResult({
+          superseded: true,
+          requestId,
+          timelineMode: timelineModeAtRequest,
+        });
       }
 
       // Обогащаем логи данными о точке росы
@@ -720,7 +772,15 @@ export function useSensors(localeComputed) {
         // Запрос не выполнен - оставляем logs как есть (null или undefined)
         sensorPoint.value = { ...sensorPoint.value, logs: sensorPoint.value?.logs ?? null };
         resetLogsProgress();
-      } else if (Array.isArray(logArray)) {
+        return logRequestResult({
+          ok: false,
+          superseded: currentLogsRequestId !== requestId,
+          requestId,
+          timelineMode: timelineModeAtRequest,
+        });
+      }
+
+      if (Array.isArray(logArray)) {
         // Данные загружены (даже если пустой массив); -1 в PM = «нет данных»
         const cleanLogs = sanitizeSensorLogsPmSentinels(logArray);
         const logs = isRealtimeMode
@@ -774,9 +834,26 @@ export function useSensors(localeComputed) {
         } else {
           resetLogsProgress();
         }
+
+        return logRequestResult({
+          ok: true,
+          requestId,
+          timelineMode: timelineModeAtRequest,
+        });
       }
+
+      return logRequestResult({
+        ok: false,
+        requestId,
+        timelineMode: timelineModeAtRequest,
+      });
     } catch (error) {
-      console.error("Error updating sensor logs:", error);
+      const aborted =
+        error?.name === "AbortError" ||
+        (currentLogsAbortController && currentLogsAbortController.signal.aborted);
+      if (!aborted) {
+        console.error("Error updating sensor logs:", error);
+      }
       // При ошибке устанавливаем null (логи не загружены)
       sensorPoint.value = { ...sensorPoint.value, logs: null };
       logsProgress.value = {
@@ -789,6 +866,11 @@ export function useSensors(localeComputed) {
         percent: logsProgress.value.percent,
         mode: mapState.timelineMode.value,
       };
+      return logRequestResult({
+        superseded: aborted || currentLogsRequestId !== requestId,
+        requestId,
+        timelineMode: timelineModeAtRequest,
+      });
     } finally {
       logsRequestInFlight = false;
       if (isRealtimeMode) {
@@ -1084,14 +1166,8 @@ export function useSensors(localeComputed) {
         }
 
         setActiveMarker(resolveOwnerClusterMarkerId(point.sensor_id));
-        if (normalizeOwnerKey(sensorPoint.value)) {
-          syncOwnerClusterMapMarker(sensorPoint.value);
-        }
       } else if (sensorPoint.value?.sensor_id) {
         setActiveMarker(resolveOwnerClusterMarkerId(sensorPoint.value.sensor_id));
-        if (normalizeOwnerKey(sensorPoint.value)) {
-          syncOwnerClusterMapMarker(sensorPoint.value);
-        }
       }
       if (mapState.currentProvider.value === "realtime" && sensorPoint.value?.sensor_id) {
         patchOwnerBundleOptions(sensorPoint.value);
@@ -1105,6 +1181,7 @@ export function useSensors(localeComputed) {
 
         preloadSensorMeta(sid, start, end).then(() => {
           if (!isSensorOpen(sid)) return;
+          if (mapState.timelineMode.value !== timelineMode) return;
           if (mapState.currentProvider.value === "realtime") {
             void hydrateOwnerBundleForRealtime(sid);
             return;
@@ -1615,11 +1692,14 @@ export function useSensors(localeComputed) {
     return rep?.sensor_id ? String(rep.sensor_id) : sid;
   };
 
+  let pendingOwnerClusterSync = null;
+  let ownerClusterSyncQueued = false;
+
   /**
    * Popup/map: exactly one marker for the active owner cluster (5 km anchor).
    * Clears orphan markers for bundle siblings on device/owner select switches.
    */
-  const syncOwnerClusterMapMarker = (point, { requireOpenPopup = true } = {}) => {
+  const applyOwnerClusterMapMarker = (point, { requireOpenPopup = true } = {}) => {
     if (!point || !sensorsUtils.isReadyLayer()) return;
     if (requireOpenPopup && !sensorPoint.value) return;
     const ownerKey = normalizeOwnerKey(point);
@@ -1646,11 +1726,13 @@ export function useSensors(localeComputed) {
     const repPoint = formatPointForSensor(repForMap, { calculateValue: true });
     if (!repPoint.model) return;
 
-    if (!shouldFilterSensor(repId)) {
-      sensorsUtils.upsertPoint(repPoint, mapState.currentUnit.value);
-    }
-
-    const idsToClear = markerIdsInAnchorCluster(clusterPool, bundleOpts, anchorGeo);
+    const idsToClear = markerIdsInAnchorCluster(
+      clusterPool,
+      bundleOpts,
+      anchorGeo,
+      ownerKey,
+      sensors.value
+    );
     const activeId = String(point?.sensor_id || "");
     if (activeId && activeId !== repId) idsToClear.add(activeId);
 
@@ -1658,17 +1740,37 @@ export function useSensors(localeComputed) {
       if (id && id !== repId) sensorsUtils.removeMarker(id);
     }
 
-    if (shouldFilterSensor(repId)) {
+    if (!shouldFilterSensor(repId)) {
+      sensorsUtils.upsertPoint(repPoint, mapState.currentUnit.value);
+    } else {
       sensorsUtils.removeMarker(repId);
     }
+
+    rebundleOwnerMarkers(ownerKey, anchorGeo);
 
     if (isSensorOpen(point.sensor_id)) {
       setActiveMarker(resolveOwnerClusterMarkerId(sensorPoint.value?.sensor_id || point.sensor_id));
     }
   };
 
+  const syncOwnerClusterMapMarker = (point, options = {}) => {
+    pendingOwnerClusterSync = { point, options };
+    if (ownerClusterSyncQueued) return;
+    ownerClusterSyncQueued = true;
+    queueMicrotask(() => {
+      ownerClusterSyncQueued = false;
+      const job = pendingOwnerClusterSync;
+      pendingOwnerClusterSync = null;
+      if (!job?.point) return;
+      applyOwnerClusterMapMarker(job.point, job.options);
+    });
+  };
+
   /** Re-color + re-highlight the open sensor's bundled map marker (e.g. after unit change). */
-  const refreshOpenSensorMapMarker = () => {
+  const refreshOpenSensorMapMarker = (ctx = {}) => {
+    const { requestId = null, timelineMode = null } = ctx;
+    if (requestId && requestId !== currentLogsRequestId) return;
+    if (timelineMode && timelineMode !== mapState.timelineMode.value) return;
     if (!sensorPoint.value?.sensor_id || !sensorsUtils.isReadyLayer()) return;
     const bundleOpts = applyFilteredOwnerBundleOptions(
       sensorPoint.value,
@@ -1679,11 +1781,24 @@ export function useSensors(localeComputed) {
       sensorPoint.value = { ...sensorPoint.value, ownerSensorsWithData: bundleOpts };
     }
     if (normalizeOwnerKey(sensorPoint.value)) {
-      syncOwnerClusterMapMarker(sensorPoint.value);
+      applyOwnerClusterMapMarker(sensorPoint.value);
     } else {
       updateSensorMarker(sensorPoint.value);
     }
     setActiveMarker(resolveOwnerClusterMarkerId(sensorPoint.value.sensor_id));
+  };
+
+  /** Full map rebundle — e.g. after day/week/month switches that can leave orphan sibling markers. */
+  const reassertMapMarkers = () => {
+    if (!sensorsUtils.isReadyLayer()) return;
+    pendingOwnerClusterSync = null;
+    ownerClusterSyncQueued = false;
+    lastUpdateKey = "";
+    updateSensorMarkers(true, { force: true });
+    if (sensorPoint.value?.sensor_id && normalizeOwnerKey(sensorPoint.value)) {
+      applyOwnerClusterMapMarker(sensorPoint.value);
+      setActiveMarker(resolveOwnerClusterMarkerId(sensorPoint.value.sensor_id));
+    }
   };
 
   /**
@@ -2054,14 +2169,14 @@ export function useSensors(localeComputed) {
    * @param {boolean} clear - Очищать ли все маркеры перед обновлением (по умолчанию true)
    * @throws {Error} При ошибке логирует ошибку в консоль
    */
-  const updateSensorMarkers = (clear = true) => {
+  const updateSensorMarkers = (clear = true, { force = false } = {}) => {
     const sensorsData = sensors.value;
     const currentUnit = mapState.currentUnit.value;
     const currentDate = mapState.currentDate.value;
 
     // Создаем ключ для предотвращения дублирующихся запросов
-    const updateKey = `${mapState.currentProvider.value}-${currentDate}-${currentUnit}-${sensors.value.length}`;
-    if (updateKey === lastUpdateKey) {
+    const updateKey = `${mapState.currentProvider.value}-${currentDate}-${currentUnit}-${mapState.timelineMode.value}-${sensors.value.length}`;
+    if (!force && updateKey === lastUpdateKey) {
       return;
     }
     lastUpdateKey = updateKey;
@@ -2220,9 +2335,11 @@ export function useSensors(localeComputed) {
     loadSensors,
     updateSensorMarkers,
     buildOwnerSensorsWithData: (point, list) => buildOwnerSensorsWithData(point, list),
+    resolveBundleAnchorGeo: (point, list) => resolveBundleAnchorGeo(point, list),
     hydrateOwnerBundleForRealtime,
     syncOwnerClusterMapMarker,
     refreshOpenSensorMapMarker,
+    reassertMapMarkers,
     setSensors,
     setSensorsNoLocation,
     clearSensors,
