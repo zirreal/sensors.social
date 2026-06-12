@@ -27,6 +27,8 @@
         </div>
       </div>
 
+      <!-- Временно скрыто: панель предупреждений logs health — возможно понадобится позже -->
+      <!--
       <div v-if="showLogsHealthWarningBanner" class="logs-health-warning-banner">
         <div>
           <span>{{
@@ -45,6 +47,7 @@
           <font-awesome-icon icon="fa-solid fa-xmark" />
         </button>
       </div>
+      -->
 
       <Chart v-if="chartHasData" :log="log" />
       <div v-else-if="showNoDataMessage" class="no-data-message">
@@ -119,11 +122,11 @@ import { useSensors } from "@/composables/useSensors";
 import {
   clearAllLogsHealthUserHide,
   loadLogsHealth,
-  setLogsHealthDayUserHide,
-  setLogsHealthSensorUserHide,
+  // setLogsHealthDayUserHide,
+  // setLogsHealthSensorUserHide,
   useLogsHealth,
 } from "@/utils/calculations/sensor/logs_health.js";
-import { enumeratePeriodDates } from "@/utils/date";
+// import { enumeratePeriodDates } from "@/utils/date";
 import measurements from "../../../measurements";
 
 import AQI from "../widgets/AQI.vue";
@@ -144,9 +147,10 @@ const localeComputed = computed(() => localStorage.getItem("locale") || "en");
 const { logsProgress, runLogsHealth } = useSensors(localeComputed);
 const { logsHealth, logsHealthMeta } = useLogsHealth();
 
+// Временно скрыто вместе с панелью logs-health-warning-banner — возможно понадобится позже
+/*
 const chartLogsHealthUi = computed(() => (runLogsHealth.value ? logsHealth.value : null));
 
-/** Подписи категорий (pm / climate / noise), у которых за видимый период healthy === false */
 const unhealthyGroupLabels = computed(() => {
   const lh = chartLogsHealthUi.value;
   if (!lh) return [];
@@ -159,6 +163,7 @@ const unhealthyGroupLabels = computed(() => {
 });
 
 const unhealthyGroupsListDisplay = computed(() => unhealthyGroupLabels.value.join(", "));
+*/
 
 const logsHealthSensorUserHide = computed(() =>
   Boolean(
@@ -180,7 +185,7 @@ const onShowSensorWarningsAgain = async () => {
   await loadLogsHealth(id, props.log, logsHealthReloadContext());
 };
 
-/** Как бывший оверлей Chart: скрыть предупреждения по дням выбранного периода */
+/*
 const onLogsHealthShowDataAnyway = async () => {
   const id = props.point?.sensor_id;
   if (!id || !runLogsHealth.value) return;
@@ -198,6 +203,7 @@ const onLogsHealthDontShowWarningsForSensor = async () => {
   await setLogsHealthSensorUserHide(id, true);
   await loadLogsHealth(id, props.log, logsHealthReloadContext());
 };
+*/
 
 const hasLogs = computed(() => Array.isArray(props.log) && props.log.length > 0);
 
@@ -205,6 +211,7 @@ const chartHasData = computed(
   () => Array.isArray(props.point?.logs) && props.point.logs.length > 0
 );
 
+/*
 const showLogsHealthWarningBanner = computed(
   () =>
     runLogsHealth.value &&
@@ -213,6 +220,7 @@ const showLogsHealthWarningBanner = computed(
     unhealthyGroupLabels.value.length > 0 &&
     !logsHealthSensorUserHide.value
 );
+*/
 
 /** Только глобальный userhide по сенсору (record.userhide). Ссылка по-прежнему снимает все userhide (дни + корень). */
 const showLogsHealthUserhideNotice = computed(

@@ -1,6 +1,8 @@
 <template>
   <div class="popup-js active">
     <section class="sensor-header">
+      <!-- Временно скрыто: иконка типа сенсора (DIY / Altruist и т.д.) — возможно понадобится позже -->
+      <!--
       <div class="sensor-type">
         <a
           v-if="log !== null && sensorTypeImage"
@@ -11,6 +13,7 @@
           <img :src="sensorTypeImage" :alt="sensorType" />
         </a>
       </div>
+      -->
 
       <div class="sensor-info-title">
         <img v-if="sensorAvatar" :src="sensorAvatar" :alt="sensor_id" class="sensor-avatar" />
@@ -452,7 +455,8 @@ watch(
 .sensor-header {
   display: grid;
   gap: var(--gap);
-  grid-template-columns: 30px 1fr 30px;
+  /* 1fr 30px — пока скрыта .sensor-type; было: 30px 1fr 30px */
+  grid-template-columns: 1fr 30px;
   align-items: center;
 }
 /* - Заголовок сенсора: тип, выбор даты, кнопка закрыть */
