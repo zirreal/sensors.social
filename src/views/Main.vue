@@ -9,16 +9,16 @@
   <Stories v-if="settings.SERVICES?.stories" />
 
   <Sensor
-    v-if="sensorsUI.isSensor"
-    :point="sensorsUI.sensorPoint"
-    @close="() => sensorsUI.handlerCloseSensor(unwatchRealtime)"
+    v-if="isSensor"
+    :point="sensorPoint"
+    @close="handleSensorClose"
   />
 
   <MessagePopup
-    v-if="messagesUI.isMessage"
-    :message="messagesUI.messageData"
-    :geo="messagesUI.messageGeo"
-    @close="messagesUI.closeMessage"
+    v-if="isMessage"
+    :message="messageData"
+    :geo="messageGeo"
+    @close="closeMessage"
   />
 
   <Map
@@ -30,7 +30,7 @@
 </template>
 
 <script setup>
-import { ref, computed, watch, reactive } from "vue";
+import { ref, computed, watch } from "vue";
 import { useRouter, useRoute } from "vue-router";
 import { useI18n } from "vue-i18n";
 
@@ -68,15 +68,45 @@ const mapRef = ref(null);
 
 const localeComputed = computed(() => localStorage.getItem("locale") || locale.value || "en");
 
-// Создаем reactive объект для sensors из composable
-const sensorsUI = reactive(useSensors(localeComputed));
+const sensorsUI = useSensors(localeComputed);
+const {
+  isSensor,
+  sensorPoint,
+  sensors,
+  handlerCloseSensor,
+  formatPointForSensor,
+  updateSensorPopup,
+  setSensorData,
+  updateSensorMarker,
+  isSensorOpen,
+  buildOwnerSensorsWithData,
+  clearSensorLogs,
+  updateSensorLogs,
+  updateSensorMaxData,
+  updateSensorMarkers,
+  refreshOpenSensorMapMarker,
+  hydrateOwnerBundleForRealtime,
+  loadSensors,
+  commitPopupShell,
+} = sensorsUI;
 
-// Создаем reactive объект для messages из composable
-const messagesUI = reactive(useMessages(localeComputed));
+const messagesUI = useMessages(localeComputed);
+const { isMessage, messageData, messageGeo, closeMessage, messages, setActiveMessage } =
+  messagesUI;
+
+const sensorsList = () => (Array.isArray(sensors.value) ? sensors.value : []);
+
+const handleSensorClose = () => {
+  handlerCloseSensor(unwatchRealtime);
+};
 
 // Обработчик клика на маркер сенсора
 const handleSensorClick = (data) => {
-  const point = sensorsUI.formatPointForSensor(data);
+  const point = formatPointForSensor(data);
+
+  // Shell first (skeleton), then enrich — survives concurrent route/provider updates.
+  commitPopupShell(point);
+  updateSensorPopup(point, { fromMapClick: true });
 
   const mapClickQuery = {
     lat: point.geo?.lat || route.query.lat,
@@ -84,13 +114,11 @@ const handleSensorClick = (data) => {
     zoom: hasValidCoordinates(point.geo) ? 18 : 3,
   };
 
-  // Owner sensors: `owner=` in URL, no `sensor=` on marker click (select adds sensor).
-  // Legacy (no owner): clear stale `owner=`, use `sensor=` like classic deep links.
   if (point.owner) {
     mapState.setMapSettings(route, router, {
       ...mapClickQuery,
       owner: String(point.owner),
-      sensor: null,
+      sensor: point.sensor_id,
     });
   } else {
     mapState.setMapSettings(route, router, {
@@ -99,8 +127,6 @@ const handleSensorClick = (data) => {
       sensor: point.sensor_id,
     });
   }
-
-  sensorsUI.updateSensorPopup(point, { fromMapClick: true });
 };
 
 // Обработчик клика на маркер сообщения
@@ -124,7 +150,7 @@ const onRealtimePoint = async (point) => {
   // Обогащаем текущие данные точкой росы
 
   // Обновляем данные для realtime
-  sensorsUI.setSensorData(point.sensor_id, {
+  setSensorData(point.sensor_id, {
     geo: point.geo,
     model: point.model,
     data: point.data,
@@ -135,18 +161,15 @@ const onRealtimePoint = async (point) => {
     timestamp: point.timestamp,
   });
 
-  sensorsUI.updateSensorMarker(point);
+  updateSensorMarker(point);
 
   // Popup chart/logs: only while realtime tab is active (day/week use remote API logs).
   if (
-    sensorsUI.isSensorOpen(point.sensor_id) &&
+    isSensorOpen(point.sensor_id) &&
     mapState.currentProvider.value === "realtime" &&
     mapState.timelineMode.value === "realtime"
   ) {
-    const prevLogs = (Array.isArray(sensorsUI.sensorPoint.value?.logs)
-      ? sensorsUI.sensorPoint.value.logs
-      : []
-    )
+    const prevLogs = (Array.isArray(sensorPoint.value?.logs) ? sensorPoint.value.logs : [])
       .map((item) => {
         const ts = Number(item?.timestamp);
         if (!Number.isFinite(ts) || !item?.data) return null;
@@ -164,12 +187,10 @@ const onRealtimePoint = async (point) => {
     // Обновляем sensorPoint с новыми данными
     // Preserve owner bundle UI options (ownerSensorsWithData) while streaming realtime updates.
     // Otherwise the owner dropdown can disappear intermittently.
-    const prevPopup = sensorsUI.sensorPoint.value;
-    // Always compute owner sensors list for the select in realtime.
-    // This is the only reliable source.
-    const list = Array.isArray(sensorsUI.sensors) ? sensorsUI.sensors : sensorsUI.sensors?.value;
-    const sensorsList = Array.isArray(list) ? list : [];
-    const listOwner = sensorsList.find((s) => String(s?.sensor_id || "") === String(point.sensor_id));
+    const prevPopup = sensorPoint.value;
+    const listOwner = sensorsList().find(
+      (s) => String(s?.sensor_id || "") === String(point.sensor_id)
+    );
     const nextPopupOwner =
       normalizeOwnerKey(point) || normalizeOwnerKey(listOwner) || normalizeOwnerKey(prevPopup) || null;
 
@@ -180,9 +201,9 @@ const onRealtimePoint = async (point) => {
       sensor_id: point.sensor_id,
       device_model: point.device_model || prevPopup?.device_model || null,
     };
-    const ownerSensorsWithData = sensorsUI.buildOwnerSensorsWithData(bundlePoint, sensorsList);
+    const ownerSensorsWithData = buildOwnerSensorsWithData(bundlePoint, sensorsList());
 
-    sensorsUI.sensorPoint.value = {
+    sensorPoint.value = {
       ...prevPopup,
       geo: point.geo || prevPopup?.geo,
       model: point.model || prevPopup?.model,
@@ -236,7 +257,7 @@ watch(
   async (newMode, oldMode) => {
     // Popup component now owns logs reloading on day/week/month switches.
     // Keeping a second reloader here causes duplicate requests/aborts, which can hide the progress bar.
-    if (sensorsUI?.isSensor) return;
+    if (isSensor.value) return;
 
     // При переходе realtime -> day/week/month загрузка уже запускается через route.query watcher
     // (providerChanged), иначе получаем дублирующий запрос логов.
@@ -255,9 +276,9 @@ watch(
       const id = route.query.owner ? mapState.currentSensorId.value : route.query.sensor;
 
       // При смене периода очищаем логи и загружаем заново
-      sensorsUI.clearSensorLogs(id);
+      clearSensorLogs(id);
       // Обновляем логи открытого сенсора
-      await sensorsUI.updateSensorLogs(id);
+      await updateSensorLogs(id);
     }
   }
 );
@@ -341,11 +362,11 @@ watch(
     // Обновляем maxdata и маркеры при изменении type (без date и provider, так как они обрабатываются через loadSensors)
     if (typeChanged) {
       if (mapState.currentProvider.value === "remote") {
-        await sensorsUI.updateSensorMaxData();
+        await updateSensorMaxData();
       } else {
-        sensorsUI.updateSensorMarkers(true);
+        updateSensorMarkers(true);
       }
-      sensorsUI.refreshOpenSensorMapMarker();
+      refreshOpenSensorMapMarker();
     }
 
     // Перезагружаем данные сенсоров при изменении даты (или timestamp-derived day), провайдера
@@ -356,17 +377,25 @@ watch(
         unwatchRealtime = null;
       }
 
-      sensorsUI.loadSensors().then(async () => {
+      const shellSensorId = route.query.sensor || sensorPoint.value?.sensor_id;
+      if (shellSensorId) {
+        commitPopupShell({
+          sensor_id: shellSensorId,
+          geo: sensorPoint.value?.geo || {
+            lat: parseFloat(route.query.lat),
+            lng: parseFloat(route.query.lng),
+          },
+          owner: route.query.owner || sensorPoint.value?.owner || null,
+          address: sensorPoint.value?.address || null,
+        });
+      }
+
+      loadSensors().then(async () => {
         const pickDefaultOwnerSensorId = (owner, lat, lng) => {
           const o = String(owner || "").trim();
           if (!o) return null;
 
-          const list = Array.isArray(sensorsUI.sensors)
-            ? sensorsUI.sensors
-            : Array.isArray(sensorsUI.sensors?.value)
-            ? sensorsUI.sensors.value
-            : [];
-
+          const list = sensorsList();
           const ownerSensors = list.filter((s) => String(s?.owner || "") === o);
           if (ownerSensors.length === 0) return null;
 
@@ -388,14 +417,13 @@ watch(
         };
 
         if (mapState.currentProvider.value === "remote") {
-          await sensorsUI.updateSensorMaxData();
+          await updateSensorMaxData();
         } else {
-          sensorsUI.updateSensorMarkers(true);
-          const hydrateId =
-            route.query.sensor || sensorsUI.sensorPoint?.value?.sensor_id || null;
+          updateSensorMarkers(true);
+          const hydrateId = route.query.sensor || sensorPoint.value?.sensor_id || null;
           if (hydrateId) {
-            void sensorsUI.hydrateOwnerBundleForRealtime(hydrateId).then(() => {
-              sensorsUI.refreshOpenSensorMapMarker?.();
+            void hydrateOwnerBundleForRealtime(hydrateId).then(() => {
+              refreshOpenSensorMapMarker?.();
             });
           }
         }
@@ -407,13 +435,11 @@ watch(
             : null;
 
         const liveSensorId =
-          route.query.sensor || ownerDefaultId || sensorsUI.sensorPoint?.value?.sensor_id;
+          route.query.sensor || ownerDefaultId || sensorPoint.value?.sensor_id;
         if (liveSensorId) {
-          // Ищем полные данные сенсора в sensorsUI.sensors
-          const fullSensorData = sensorsUI.sensors.find((s) => s.sensor_id === liveSensorId);
-          // Сохраняем адрес из текущего sensorPoint, если он есть
-          const existingAddress = sensorsUI.sensorPoint?.value?.address;
-          const point = sensorsUI.formatPointForSensor(
+          const fullSensorData = sensorsList().find((s) => s.sensor_id === liveSensorId);
+          const existingAddress = sensorPoint.value?.address;
+          const point = formatPointForSensor(
             fullSensorData || {
               sensor_id: liveSensorId,
               geo: { lat: parseFloat(route.query.lat), lng: parseFloat(route.query.lng) },
@@ -423,7 +449,7 @@ watch(
               address: existingAddress || null,
             }
           );
-          sensorsUI.updateSensorPopup(point);
+          updateSensorPopup(point);
         }
       });
       return; // Останавливаем выполнение watcher после перезагрузки данных
@@ -433,11 +459,9 @@ watch(
     // Important: on hard refresh `providerChanged` is true (oldQuery undefined), but we still
     // must open the popup from URL in realtime mode.
     if (newQuery.sensor && (sensorChanged || !oldQuery)) {
-      // In realtime mode `sensorsUI.sensors` can be empty on startup until pubsub points arrive.
-      // Still open/update popup using URL fallback, so logs loading can start immediately.
-      const fullSensorData = sensorsUI.sensors.find((s) => s.sensor_id === newQuery.sensor);
-      const existingAddress = sensorsUI.sensorPoint?.value?.address;
-      const point = sensorsUI.formatPointForSensor(
+      const fullSensorData = sensorsList().find((s) => s.sensor_id === newQuery.sensor);
+      const existingAddress = sensorPoint.value?.address;
+      const point = formatPointForSensor(
         fullSensorData || {
           sensor_id: newQuery.sensor,
           geo: { lat: parseFloat(newQuery.lat), lng: parseFloat(newQuery.lng) },
@@ -445,10 +469,10 @@ watch(
           address: existingAddress || null,
         }
       );
-      sensorsUI.updateSensorPopup(point);
+      updateSensorPopup(point);
     }
 
-    // Realtime deep link: owner=... without sensor=...
+    // Realtime deep link: owner=... without sensor=... (shared links only, not marker clicks).
     if (
       mapState.currentProvider.value === "realtime" &&
       newQuery.owner &&
@@ -462,13 +486,16 @@ watch(
       const hasAnchor = Number.isFinite(latN) && Number.isFinite(lngN);
       if (!owner || !hasAnchor) return;
 
+      const openPoint = sensorPoint.value;
+      if (openPoint?.sensor_id && String(openPoint.owner || "").trim() === owner) {
+        return;
+      }
+
       // One-shot per (owner + day + type + provider) to avoid loops on every realtime tick.
       const k = `${owner}-${newQuery.date || ""}-${newQuery.type || ""}-${newQuery.provider || ""}`;
       if (realtimeOwnerDeepLinkHandled.value.key === k) return;
 
-      const list = Array.isArray(sensorsUI.sensors) ? sensorsUI.sensors : sensorsUI.sensors?.value;
-      const sensorsList = Array.isArray(list) ? list : [];
-      const ownerSensors = sensorsList.filter((s) => String(s?.owner || "").trim() === owner);
+      const ownerSensors = sensorsList().filter((s) => String(s?.owner || "").trim() === owner);
       const anchor = { lat: latN, lng: lngN };
 
       const nearby = ownerSensors.filter(
@@ -488,17 +515,14 @@ watch(
         zoom: newQuery.zoom ?? 18,
       });
 
-      sensorsUI.updateSensorPopup(best, { fromMapClick: true });
+      updateSensorPopup(best, { fromMapClick: true });
     }
 
     // Обновляем попап сообщения при изменении message или при первом заходе с сообщением
-    if (newQuery.message && messagesUI.messages.value.length > 0 && (messageChanged || !oldQuery)) {
-      // Ищем полные данные сообщения в messagesUI.messages
-      const fullMessageData = messagesUI.messages.value.find(
-        (m) => m.message_id === newQuery.message
-      );
+    if (newQuery.message && messages.value.length > 0 && (messageChanged || !oldQuery)) {
+      const fullMessageData = messages.value.find((m) => m.message_id === newQuery.message);
       if (fullMessageData) {
-        messagesUI.setActiveMessage(fullMessageData);
+        setActiveMessage(fullMessageData);
       }
     }
   },

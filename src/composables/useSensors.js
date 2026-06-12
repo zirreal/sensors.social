@@ -1,4 +1,4 @@
-import { ref, computed, watch } from "vue";
+import { ref, computed, watch, nextTick } from "vue";
 import { useRouter, useRoute } from "vue-router";
 
 import { useMap } from "@/composables/useMap";
@@ -368,9 +368,12 @@ let lastLoadProvider = null;
 let currentLogsAbortController = null;
 let currentLogsKey = null;
 let logsRequestInFlight = false;
+let popupSessionId = 0;
 
 /** Pubsub-active sensor IDs this realtime session — module-level like `sensors`. */
 const realtimeLiveSensorIds = ref(new Set());
+const realtimeHydratedSid = ref(null);
+let realtimeHydrationWatchersRegistered = false;
 
 export function useSensors(localeComputed) {
   const localeRef =
@@ -879,6 +882,64 @@ export function useSensors(localeComputed) {
     }
   };
 
+  /** Mount popup immediately with skeleton (logs null) while async enrich runs. */
+  const commitPopupShell = (rawPoint) => {
+    const sid = String(rawPoint?.sensor_id || "");
+    if (!sid) return false;
+
+    const prev = sensorPoint.value;
+    const sameSensor = prev && String(prev.sensor_id) === sid;
+
+    let geo = rawPoint?.geo;
+    if (!hasValidCoordinates(geo) && sameSensor && hasValidCoordinates(prev?.geo)) {
+      geo = prev.geo;
+    }
+    if (!hasValidCoordinates(geo) && route.query.lat != null && route.query.lng != null) {
+      const lat = parseFloat(route.query.lat);
+      const lng = parseFloat(route.query.lng);
+      if (Number.isFinite(lat) && Number.isFinite(lng)) {
+        geo = { lat, lng };
+      }
+    }
+
+    const logs =
+      sameSensor && Array.isArray(prev?.logs)
+        ? prev.logs
+        : Array.isArray(rawPoint?.logs)
+          ? rawPoint.logs
+          : null;
+
+    mapState.mapinactive.value = true;
+    const shell = formatPointForSensor({
+      sensor_id: sid,
+      geo: geo || { lat: 0, lng: 0 },
+      model: rawPoint?.model || prev?.model || DEFAULT_SENSOR_MODEL,
+      device_model: rawPoint?.device_model ?? prev?.device_model ?? null,
+      owner:
+        rawPoint?.owner ||
+        prev?.owner ||
+        (route.query.owner ? String(route.query.owner) : null),
+      address: rawPoint?.address || prev?.address || null,
+      data: rawPoint?.data || prev?.data || {},
+      maxdata: rawPoint?.maxdata || prev?.maxdata || {},
+      logs,
+      ownerSensorsWithData:
+        rawPoint?.ownerSensorsWithData ||
+        (sameSensor ? prev?.ownerSensorsWithData : null) ||
+        null,
+    });
+
+    if (mapState.currentProvider.value === "realtime") {
+      const bundleOpts = buildOwnerSensorsWithData(shell, sensors.value);
+      if (bundleOpts?.length) {
+        shell.ownerSensorsWithData = bundleOpts;
+      }
+    }
+
+    sensorPoint.value = shell;
+    return true;
+  };
+
   /**
    * Открывает попап сенсора с данными и адресом
    * @param {Object} point - Данные сенсора
@@ -887,14 +948,8 @@ export function useSensors(localeComputed) {
    * @param {number} [point.model] - Модель сенсора
    * @param {Object} [point.maxdata] - Максимальные данные
    * @param {Object} [point.data] - Текущие данные
-   * @throws {Error} При ошибке сбрасывает состояние попапа
    */
   const updateSensorPopup = (point, options = {}) => {
-    // Защита от повторных вызовов
-    if (isUpdatingPopup.value) {
-      return;
-    }
-
     if (!point.sensor_id) {
       return;
     }
@@ -932,6 +987,15 @@ export function useSensors(localeComputed) {
     if (!options.fromMapClick && route.query.sensor && route.query.sensor !== point.sensor_id) {
       return;
     }
+
+    commitPopupShell(point);
+
+    // Marker clicks must always win; other callers can wait for the in-flight enrich pass.
+    if (isUpdatingPopup.value && !options.fromMapClick) {
+      return;
+    }
+
+    const session = ++popupSessionId;
 
     try {
       isUpdatingPopup.value = true;
@@ -998,7 +1062,8 @@ export function useSensors(localeComputed) {
       };
 
       const patchOwnerBundleOptions = (p) => {
-        if (!p?.sensor_id) return;
+        if (!p?.sensor_id || !sensorPoint.value) return;
+        if (String(sensorPoint.value.sensor_id) !== String(p.sensor_id)) return;
         const opts = applyFilteredOwnerBundleOptions(
           p,
           p.ownerSensorsWithData,
@@ -1023,10 +1088,6 @@ export function useSensors(localeComputed) {
         if (!point.address && open?.address) {
           point.address = open.address;
         }
-      }
-
-      if (mapState.currentProvider.value === "realtime" && sensorPoint.value?.sensor_id) {
-        patchOwnerBundleOptions(sensorPoint.value);
       }
 
       // Получаем адрес сенсора - сначала из кэша, потом из API
@@ -1165,7 +1226,18 @@ export function useSensors(localeComputed) {
           });
         }
 
-        setActiveMarker(resolveOwnerClusterMarkerId(point.sensor_id));
+        const highlightMarker = () => {
+          try {
+            setActiveMarker(resolveOwnerClusterMarkerId(point.sensor_id));
+          } catch (e) {
+            console.warn("setActiveMarker failed", e);
+          }
+        };
+        if (isNewPopup) {
+          void nextTick(highlightMarker);
+        } else {
+          highlightMarker();
+        }
       } else if (sensorPoint.value?.sensor_id) {
         setActiveMarker(resolveOwnerClusterMarkerId(sensorPoint.value.sensor_id));
       }
@@ -1180,10 +1252,14 @@ export function useSensors(localeComputed) {
         const { start, end } = popupPeriodBounds(timelineMode, mapState.currentDate.value);
 
         preloadSensorMeta(sid, start, end).then(() => {
+          if (session !== popupSessionId) return;
           if (!isSensorOpen(sid)) return;
           if (mapState.timelineMode.value !== timelineMode) return;
           if (mapState.currentProvider.value === "realtime") {
-            void hydrateOwnerBundleForRealtime(sid);
+            void nextTick(() => {
+              if (session !== popupSessionId || !isSensorOpen(sid)) return;
+              void hydrateOwnerBundleForRealtime(sid, session);
+            });
             return;
           }
           const anchorGeo = resolveBundleAnchorGeo(sensorPoint.value, sensors.value);
@@ -1206,89 +1282,33 @@ export function useSensors(localeComputed) {
       if (mapState.currentProvider.value === "remote" && Array.isArray(currentLogs)) {
         // Логи уже загружены для remote - не делаем повторный запрос
       } else {
-        // Логи не загружены или это realtime - загружаем/обновляем
-        updateSensorLogs(point.sensor_id);
+        void nextTick(() => {
+          if (session !== popupSessionId || !isSensorOpen(point.sensor_id)) return;
+          void updateSensorLogs(point.sensor_id);
+        });
       }
 
       const nextOwnerKey = normalizeOwnerKey(sensorPoint.value);
-      if (prevOwnerKey && nextOwnerKey && prevOwnerKey !== nextOwnerKey) {
-        rebundleOwnerMarkers(prevOwnerKey);
-        rebundleOwnerMarkers(nextOwnerKey);
-      }
-      if (nextOwnerKey && sensorPoint.value) {
-        syncOwnerClusterMapMarker(sensorPoint.value);
-      }
+      void nextTick(() => {
+        if (session !== popupSessionId || !sensorPoint.value) return;
+        try {
+          if (prevOwnerKey && nextOwnerKey && prevOwnerKey !== nextOwnerKey) {
+            rebundleOwnerMarkers(prevOwnerKey);
+            rebundleOwnerMarkers(nextOwnerKey);
+          }
+          if (nextOwnerKey) {
+            syncOwnerClusterMapMarker(sensorPoint.value);
+          }
+        } catch (e) {
+          console.warn("post-popup marker sync failed", e);
+        }
+      });
     } catch (error) {
       console.error("Error updating sensor popup:", error);
-      // Сбрасываем состояние при ошибке
-      sensorPoint.value = null;
-      mapState.mapinactive.value = false;
     } finally {
       isUpdatingPopup.value = false;
     }
   };
-
-  /**
-   * Realtime hydration (safe):
-   * On hard refresh, the popup can open from URL before pubsub delivered any points,
-   * so header/select show skeleton. As soon as the sensor appears in `sensors.value`,
-   * we PATCH the already-open popup once (no re-opening, no log reload storm).
-   */
-  const realtimeHydratedSid = ref(null);
-  watch(
-    () => route.query.sensor,
-    (nextSid, prevSid) => {
-      if (String(nextSid || "") !== String(prevSid || "")) {
-        realtimeHydratedSid.value = null;
-      }
-    }
-  );
-  watch(
-    () => [mapState.currentProvider.value, route.query.sensor, sensors.value.length],
-    () => {
-      if (mapState.currentProvider.value !== "realtime") return;
-      const sid = String(route.query.sensor || sensorPoint.value?.sensor_id || "").trim();
-      if (!sid) return;
-      if (!sensorPoint.value || String(sensorPoint.value.sensor_id || "") !== sid) return;
-
-      // One-shot per sensor id.
-      if (realtimeHydratedSid.value === sid) return;
-
-      const full = (Array.isArray(sensors.value) ? sensors.value : []).find(
-        (s) => String(s?.sensor_id || "") === sid
-      );
-      if (!full) return;
-
-      const ownerKey =
-        resolveOwnerForSensorId(sid, sensors.value, full) ||
-        normalizeOwnerKey(sensorPoint.value) ||
-        "";
-
-      // Patch header-critical fields only (avoid updateSensorPopup() loops).
-      const next = {
-        ...sensorPoint.value,
-        geo: full.geo || sensorPoint.value.geo,
-        model: full.model || sensorPoint.value.model,
-        owner: full.owner || sensorPoint.value.owner,
-        device_model: full.device_model ?? sensorPoint.value.device_model ?? null,
-        data: full.data || sensorPoint.value.data,
-      };
-      const bundleOpts = ownerKey
-        ? applyFilteredOwnerBundleOptions({ ...next, owner: ownerKey }, null, sensors.value)
-        : null;
-      sensorPoint.value = {
-        ...next,
-        ...(ownerKey ? { owner: ownerKey } : null),
-        ...(bundleOpts?.length ? { ownerSensorsWithData: bundleOpts } : null),
-      };
-      realtimeHydratedSid.value = sid;
-
-      if (ownerKey) {
-        syncOwnerClusterMapMarker(sensorPoint.value);
-      }
-    },
-    { immediate: true }
-  );
 
   /**
    * Создает унифицированный объект point для сенсора
@@ -1766,6 +1786,68 @@ export function useSensors(localeComputed) {
     });
   };
 
+  /**
+   * Realtime hydration (safe):
+   * On hard refresh, the popup can open from URL before pubsub delivered any points,
+   * so header/select show skeleton. As soon as the sensor appears in `sensors.value`,
+   * we PATCH the already-open popup once (no re-opening, no log reload storm).
+   */
+  if (!realtimeHydrationWatchersRegistered) {
+    realtimeHydrationWatchersRegistered = true;
+    watch(
+      () => route.query.sensor,
+      (nextSid, prevSid) => {
+        if (String(nextSid || "") !== String(prevSid || "")) {
+          realtimeHydratedSid.value = null;
+        }
+      }
+    );
+    watch(
+      () => [mapState.currentProvider.value, route.query.sensor, sensors.value.length],
+      () => {
+        if (mapState.currentProvider.value !== "realtime") return;
+        const sid = String(route.query.sensor || sensorPoint.value?.sensor_id || "").trim();
+        if (!sid) return;
+        if (!sensorPoint.value || String(sensorPoint.value.sensor_id || "") !== sid) return;
+
+        if (realtimeHydratedSid.value === sid) return;
+
+        const full = (Array.isArray(sensors.value) ? sensors.value : []).find(
+          (s) => String(s?.sensor_id || "") === sid
+        );
+        if (!full) return;
+
+        const ownerKey =
+          resolveOwnerForSensorId(sid, sensors.value, full) ||
+          normalizeOwnerKey(sensorPoint.value) ||
+          "";
+
+        const next = {
+          ...sensorPoint.value,
+          geo: full.geo || sensorPoint.value.geo,
+          model: full.model || sensorPoint.value.model,
+          owner: full.owner || sensorPoint.value.owner,
+          device_model: full.device_model ?? sensorPoint.value.device_model ?? null,
+          data: full.data || sensorPoint.value.data,
+        };
+        const bundleOpts = ownerKey
+          ? applyFilteredOwnerBundleOptions({ ...next, owner: ownerKey }, null, sensors.value)
+          : null;
+        sensorPoint.value = {
+          ...next,
+          ...(ownerKey ? { owner: ownerKey } : null),
+          ...(bundleOpts?.length ? { ownerSensorsWithData: bundleOpts } : null),
+        };
+        realtimeHydratedSid.value = sid;
+
+        if (ownerKey) {
+          syncOwnerClusterMapMarker(sensorPoint.value);
+        }
+      },
+      { immediate: true }
+    );
+  }
+
   /** Re-color + re-highlight the open sensor's bundled map marker (e.g. after unit change). */
   const refreshOpenSensorMapMarker = (ctx = {}) => {
     const { requestId = null, timelineMode = null } = ctx;
@@ -1953,6 +2035,7 @@ export function useSensors(localeComputed) {
     }
 
     // Затем очищаем состояние попапа сенсора
+    popupSessionId += 1;
     const closingId = route.query.sensor || null;
     sensorPoint.value = null;
     if (closingId) {
@@ -2023,12 +2106,16 @@ export function useSensors(localeComputed) {
   /**
    * Realtime: load today's owner bundle for select + seed map rows so the bundled marker survives day↔realtime switches before every sibling publishes on pubsub.
    */
-  const hydrateOwnerBundleForRealtime = async (sensorId) => {
+  const hydrateOwnerBundleForRealtime = async (sensorId, session = popupSessionId) => {
     const sid = sensorId ? String(sensorId) : "";
     if (!sid || mapState.currentProvider.value !== "realtime") return;
+    if (!isSensorOpen(sid)) return;
 
     const { start, end } = dayBoundsUnix(mapState.currentDate.value);
     await preloadSensorMeta(sid, start, end);
+
+    if (session !== popupSessionId || !isSensorOpen(sid)) return;
+    if (mapState.currentProvider.value !== "realtime") return;
 
     const ownerKey =
       resolveOwnerForSensorId(sid, sensors.value, {
@@ -2042,6 +2129,8 @@ export function useSensors(localeComputed) {
         sensors.value
       ) || null;
 
+    if (session !== popupSessionId || !isSensorOpen(sid)) return;
+
     if (isSensorOpen(sid) && sensorPoint.value) {
       const pointForBundle = {
         ...sensorPoint.value,
@@ -2049,11 +2138,15 @@ export function useSensors(localeComputed) {
         owner: ownerKey || sensorPoint.value.owner,
       };
       const merged = applyFilteredOwnerBundleOptions(pointForBundle, null, sensors.value);
-      sensorPoint.value = {
-        ...pointForBundle,
-        ...(merged?.length ? { ownerSensorsWithData: merged } : null),
-      };
+      if (session === popupSessionId) {
+        sensorPoint.value = {
+          ...pointForBundle,
+          ...(merged?.length ? { ownerSensorsWithData: merged } : null),
+        };
+      }
     }
+
+    if (session !== popupSessionId || !isSensorOpen(sid)) return;
 
     const metaList = getOwnerSensorsWithData(sid, anchorGeo, sensors.value);
     const scopedMeta =
@@ -2089,8 +2182,10 @@ export function useSensors(localeComputed) {
         );
         added = true;
       }
-      if (added) setSensors(next);
+      if (added && session === popupSessionId) setSensors(next);
     }
+
+    if (session !== popupSessionId || !isSensorOpen(sid)) return;
 
     if (ownerKey && isSensorOpen(sid) && sensorPoint.value) {
       syncOwnerClusterMapMarker(sensorPoint.value);
@@ -2327,6 +2422,7 @@ export function useSensors(localeComputed) {
     setSensorData,
     updateSensorLogs,
     updateSensorPopup,
+    commitPopupShell,
     formatPointForSensor,
     calculateMarkerValue,
     updateSensorMarker,
