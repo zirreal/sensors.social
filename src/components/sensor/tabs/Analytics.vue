@@ -218,19 +218,18 @@ const showLogsHealthUserhideNotice = computed(
   () => runLogsHealth.value && hasLogs.value && chartHasData.value && logsHealthSensorUserHide.value
 );
 
-const isRealtimeAwaitingLiveData = computed(
-  () =>
+const showNoDataMessage = computed(() => {
+  // `null` = still loading → skeleton (not this message).
+  // `[]` = fetch finished with no points → "No data available".
+  // Realtime: keep skeleton until _logsKey is set (API finished and sensor is live).
+  if (!Array.isArray(props.log) || props.log.length > 0) return false;
+  if (
     mapState.currentProvider.value === "realtime" &&
     mapState.timelineMode.value === "realtime" &&
-    Array.isArray(props.log) &&
-    props.log.length === 0
-);
-
-const showNoDataMessage = computed(() => {
-  // "No data" once logs are loaded as an empty array.
-  // `null` = loading → skeleton. In realtime, empty [] before pubsub also → skeleton.
-  if (!Array.isArray(props.log) || props.log.length > 0) return false;
-  if (isRealtimeAwaitingLiveData.value) return false;
+    !props.point?._logsKey
+  ) {
+    return false;
+  }
   return true;
 });
 
