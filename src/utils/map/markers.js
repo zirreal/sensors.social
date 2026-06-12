@@ -351,7 +351,12 @@ export function applyActiveMarker(marker) {
  * Clears active marker state
  */
 export function clearActiveMarker() {
-  const ctx = getMapContext();
+  let ctx;
+  try {
+    ctx = getMapContext();
+  } catch {
+    return;
+  }
 
   if (ctx.activeMarker) {
     const element = ctx.activeMarker.getElement();

@@ -209,7 +209,12 @@ export function switchMessagesLayer(map, enabled = false) {
 }
 
 export function refreshClusters() {
-  const ctx = getMapContext();
+  let ctx;
+  try {
+    ctx = getMapContext();
+  } catch {
+    return;
+  }
   if (ctx.markersLayer) {
     // If a cluster is currently spiderfied, refreshing clusters collapses the web.
     if (ctx.markersLayer.__spiderfyOpen) return;

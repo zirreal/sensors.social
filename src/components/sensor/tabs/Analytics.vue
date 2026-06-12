@@ -218,10 +218,20 @@ const showLogsHealthUserhideNotice = computed(
   () => runLogsHealth.value && hasLogs.value && chartHasData.value && logsHealthSensorUserHide.value
 );
 
+const isRealtimeAwaitingLiveData = computed(
+  () =>
+    mapState.currentProvider.value === "realtime" &&
+    mapState.timelineMode.value === "realtime" &&
+    Array.isArray(props.log) &&
+    props.log.length === 0
+);
+
 const showNoDataMessage = computed(() => {
-  // "No data" should show for any provider once logs are loaded as an empty array.
-  // `null` means "still loading / not loaded".
-  return Array.isArray(props.log) && props.log.length === 0;
+  // "No data" once logs are loaded as an empty array.
+  // `null` = loading → skeleton. In realtime, empty [] before pubsub also → skeleton.
+  if (!Array.isArray(props.log) || props.log.length > 0) return false;
+  if (isRealtimeAwaitingLiveData.value) return false;
+  return true;
 });
 
 // Проверяем, здоровы ли данные PM (для отображения AQI)

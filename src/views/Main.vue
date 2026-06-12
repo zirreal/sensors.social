@@ -97,7 +97,7 @@ const { isMessage, messageData, messageGeo, closeMessage, messages, setActiveMes
 const sensorsList = () => (Array.isArray(sensors.value) ? sensors.value : []);
 
 const handleSensorClose = () => {
-  handlerCloseSensor(unwatchRealtime);
+  handlerCloseSensor();
 };
 
 // Обработчик клика на маркер сенсора
@@ -378,6 +378,9 @@ watch(
       }
 
       const shellSensorId = route.query.sensor || sensorPoint.value?.sensor_id;
+      if (shellSensorId && newQuery.provider === "realtime") {
+        clearSensorLogs(shellSensorId);
+      }
       if (shellSensorId) {
         commitPopupShell({
           sensor_id: shellSensorId,

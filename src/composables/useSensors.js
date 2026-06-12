@@ -11,7 +11,6 @@ import {
   getSensors,
   getSensorDataWithCache,
   getMaxData,
-  unsubscribeRealtime,
   saveAddressToCache,
   getCachedAddress,
   getSensorOwner,
@@ -558,6 +557,27 @@ export function useSensors(localeComputed) {
     setSensors(applySensorPatchToList(sensors.value, sensorId, data));
   };
 
+  /** True once pubsub (or live row) has delivered payload for this sensor in realtime. */
+  const sensorHasRealtimePayload = (sensorId) => {
+    const sid = String(sensorId || "");
+    if (!sid) return false;
+    if (realtimeLiveSensorIds.value.has(sid)) return true;
+    const row = sensors.value?.find((s) => String(s?.sensor_id || "") === sid);
+    const rowData = row?.data;
+    if (rowData && typeof rowData === "object" && Object.keys(rowData).length > 0) return true;
+    const popup = sensorPoint.value;
+    if (
+      popup &&
+      String(popup.sensor_id) === sid &&
+      popup.data &&
+      typeof popup.data === "object" &&
+      Object.keys(popup.data).length > 0
+    ) {
+      return true;
+    }
+    return false;
+  };
+
   /**
    * Обновляет логи сенсора для открытого попапа
    * @param {string} sensorId - ID сенсора для обновления логов
@@ -786,9 +806,26 @@ export function useSensors(localeComputed) {
       if (Array.isArray(logArray)) {
         // Данные загружены (даже если пустой массив); -1 в PM = «нет данных»
         const cleanLogs = sanitizeSensorLogsPmSentinels(logArray);
-        const logs = isRealtimeMode
+        let logs = isRealtimeMode
           ? mergeSensorLogsByTimestamp(sensorPoint.value?.logs, cleanLogs)
           : cleanLogs;
+
+        // Realtime chart: empty API before pubsub → keep null (skeleton), not "no data".
+        if (
+          isRealtimeMode &&
+          mapState.timelineMode.value === "realtime" &&
+          logs.length === 0 &&
+          !sensorHasRealtimePayload(sensorId)
+        ) {
+          sensorPoint.value = { ...sensorPoint.value, logs: null, _logsKey: null };
+          resetLogsProgress();
+          return logRequestResult({
+            ok: false,
+            requestId,
+            timelineMode: timelineModeAtRequest,
+          });
+        }
+
         const anchorGeo = resolveBundleAnchorGeo(sensorPoint.value, sensors.value);
         const ownerSensorsWithData = isRealtimeMode
           ? null
@@ -902,8 +939,14 @@ export function useSensors(localeComputed) {
       }
     }
 
-    const logs =
-      sameSensor && Array.isArray(prev?.logs)
+    const isRealtimeTimeline =
+      mapState.currentProvider.value === "realtime" &&
+      mapState.timelineMode.value === "realtime";
+    const logs = isRealtimeTimeline
+      ? Array.isArray(rawPoint?.logs) && rawPoint.logs.length > 0
+        ? rawPoint.logs
+        : null
+      : sameSensor && Array.isArray(prev?.logs)
         ? prev.logs
         : Array.isArray(rawPoint?.logs)
           ? rawPoint.logs
@@ -1052,6 +1095,12 @@ export function useSensors(localeComputed) {
           geo: next.geo || prev.geo,
           model: next.model || prev.model,
           data: next.data || prev.data,
+          logs:
+            mapState.currentProvider.value === "realtime"
+              ? (next.logs ?? null)
+              : next.logs !== undefined
+                ? next.logs
+                : prev.logs,
           ownerSensorsWithData,
         };
       };
@@ -1466,7 +1515,11 @@ export function useSensors(localeComputed) {
 
     const openRep = isOpenOwnerClusterRep(point);
 
-    if (openRep || currentUnit === "co2") {
+    if (
+      openRep ||
+      currentUnit === "co2" ||
+      mapState.currentProvider.value === "realtime"
+    ) {
       const clusterMax = maxValueInOwnerCluster(point);
       if (clusterMax !== null) return { value: clusterMax, isEmpty: false };
     }
@@ -2026,15 +2079,9 @@ export function useSensors(localeComputed) {
     resetLogsProgress();
   };
 
-  const handlerCloseSensor = (unwatchRealtime) => {
+  const handlerCloseSensor = () => {
     mapState.mapinactive.value = false;
 
-    // Сначала отписываемся от realtime
-    if (unwatchRealtime) {
-      unsubscribeRealtime(unwatchRealtime);
-    }
-
-    // Затем очищаем состояние попапа сенсора
     popupSessionId += 1;
     const closingId = route.query.sensor || null;
     sensorPoint.value = null;
@@ -2042,15 +2089,16 @@ export function useSensors(localeComputed) {
       recentlyClosed.value = { id: closingId, until: Date.now() + 1500 };
     }
 
-    // Очищаем активный маркер (также сбрасывает активную область карты)
-    clearActiveMarker();
+    try {
+      clearActiveMarker();
+    } catch {
+      // Map layer may not be ready yet.
+    }
 
-    // Убираем sensor и owner из URL при закрытии попапа
     const currentQuery = { ...route.query };
     delete currentQuery.sensor;
     delete currentQuery.owner;
 
-    // If we navigated to a historical date via a Story, reset date back to today on close
     try {
       const shouldReset = sessionStorage.getItem("story_nav_set_date") === "1";
       if (shouldReset) {
@@ -2063,9 +2111,14 @@ export function useSensors(localeComputed) {
     router.replace({ query: currentQuery });
 
     // Popup sync only touches one anchor cluster; restore the full map on close.
+    if (!sensorsUtils.isReadyLayer()) return;
     lastUpdateKey = "";
     rebundleOwnerMarkers();
-    sensorsUtils.refreshClusters();
+    try {
+      sensorsUtils.refreshClusters();
+    } catch {
+      // Map layer may not be ready yet.
+    }
   };
 
   /**
@@ -2265,6 +2318,8 @@ export function useSensors(localeComputed) {
    * @throws {Error} При ошибке логирует ошибку в консоль
    */
   const updateSensorMarkers = (clear = true, { force = false } = {}) => {
+    if (!sensorsUtils.isReadyLayer()) return;
+
     const sensorsData = sensors.value;
     const currentUnit = mapState.currentUnit.value;
     const currentDate = mapState.currentDate.value;
@@ -2279,7 +2334,11 @@ export function useSensors(localeComputed) {
     try {
       // Очищаем все маркеры перед обновлением только если нужно
       if (clear) {
-        sensorsUtils.clearAllMarkers();
+        try {
+          sensorsUtils.clearAllMarkers();
+        } catch {
+          return;
+        }
       }
 
       let markersCreated = 0;
