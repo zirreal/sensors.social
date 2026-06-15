@@ -54,8 +54,8 @@
     </section>
 
     <section class="info-wrap">
-      <Accordion v-if="units && scales && scales.length > 0">
-        <template #title>{{ t("scales.title") }}</template>
+      <div v-if="units && scales && scales.length > 0" class="scales-block">
+        <p class="scales-title">{{ t("scales.title") }}</p>
         <div class="scalegrid">
           <div v-for="item in scales" :key="item.label">
             <template v-if="item?.zones && (item.name || item.label)">
@@ -85,11 +85,7 @@
             </template>
           </div>
         </div>
-      </Accordion>
-
-      <section>
-        <Bookmark v-if="point?.sensor_id" :point="point" />
-      </section>
+      </div>
 
       <div
         v-if="showLogsHealthUserhideNotice"
@@ -130,8 +126,6 @@ import AQI from "../widgets/AQI.vue";
 import Chart from "../widgets/Chart.vue";
 import Timeline from "../widgets/Timeline.vue";
 // import NativeShare from "../widgets/NativeShare.vue";
-import Accordion from "../../controls/Accordion.vue";
-import Bookmark from "../widgets/Bookmark.vue";
 
 const props = defineProps({
   point: Object,
@@ -357,6 +351,15 @@ watch(
   100% {
     background-position: -200% 0;
   }
+}
+
+.scales-block {
+  margin-bottom: calc(var(--gap) * 2);
+}
+
+.scales-title {
+  font-weight: 600;
+  margin-bottom: var(--gap);
 }
 
 .scalegrid {

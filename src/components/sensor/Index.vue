@@ -1,19 +1,17 @@
 <template>
   <div class="popup-js active">
-    <section class="sensor-header">
-      <div class="sensor-type">
-        <a
-          v-if="log !== null && sensorTypeImage"
-          :href="sensorTypeLink"
-          target="_blank"
-          rel="noopener noreferrer"
+    
+    <div class="sensor-header">
+      <div v-if="!isBookmarked && !showBookmarkForm" class="title title-bookmark-no">
+        <button
+          type="button"
+          class="button"
+          :aria-label="t('sensorpopup.bookmarkbutton')"
+          :title="t('sensorpopup.bookmarkbutton')"
+          @click.prevent="openAddForm"
         >
-          <img :src="sensorTypeImage" :alt="sensorType" />
-        </a>
-      </div>
-
-      <div class="sensor-info-title">
-        <img v-if="sensorAvatar" :src="sensorAvatar" :alt="sensor_id" class="sensor-avatar" />
+          <font-awesome-icon icon="fa-solid fa-bookmark" />
+        </button>
 
         <h3>
           <template v-if="point?.address">{{ point.address }}</template>
@@ -21,52 +19,72 @@
         </h3>
       </div>
 
-      <button @click.prevent="closesensor" aria-label="Close sensor" class="localbutton-close">
+      <div v-else-if="showBookmarkForm" class="title title-bookmark-add">
+        <button
+          type="button"
+          class="button button-clean"
+          :aria-label="t('sensorpopup.editbookmark')"
+          :title="t('sensorpopup.editbookmark')"
+          @click.prevent="cancelForm"
+        >
+          <font-awesome-icon icon="fa-solid fa-reply" />
+        </button>
+
+        <form @submit.prevent="saveBookmark">
+          <input
+            v-model="bookmarkName"
+            type="text"
+            :placeholder="t('sensorpopup.bookmarkplaceholder')"
+          />
+          <div>
+            <button
+              type="submit"
+              class="button"
+              :aria-label="t('sensorpopup.bookmarkbutton')"
+              :title="t('sensorpopup.bookmarkbutton')"
+            >
+              <font-awesome-icon icon="fa-solid fa-floppy-disk" />
+            </button>
+            <button
+              v-if="isBookmarked"
+              type="button"
+              class="button button-red"
+              :aria-label="t('sensorpopup.deletebookmark')"
+              :title="t('sensorpopup.deletebookmark')"
+              @click.prevent="deleteBookmark"
+            >
+              <font-awesome-icon icon="fa-solid fa-trash" />
+            </button>
+          </div>
+        </form>
+
+        <div class="text-small">
+          <template v-if="point?.address">{{ point.address }}</template>
+          <span v-else class="skeleton skeleton-text"></span>
+        </div>
+      </div>
+
+      <div v-else class="title title-bookmark-added">
+        <h3>
+          <button
+            type="button"
+            :aria-label="t('sensorpopup.editbookmark')"
+            :title="t('sensorpopup.editbookmark')"
+            @click.prevent="startEditing"
+          >
+            <font-awesome-icon icon="fa-solid fa-bookmark" />
+            {{ bookmarkName }}
+          </button>
+        </h3>
+
+        <div class="text-small">
+          <template v-if="point?.address">{{ point.address }}</template>
+          <span v-else class="skeleton skeleton-text"></span>
+        </div>
+      </div>
+
+      <button @click.prevent="closesensor" aria-label="Close sensor" class="close">
         <font-awesome-icon icon="fa-solid fa-xmark" />
-      </button>
-    </section>
-
-    <!-- <div class="sensor-info-desc">Here you'll see some custom description</div> -->
-
-    <div class="sensor-panel">
-      <button
-        class="panel-button"
-        :class="{ active: activeTab === 'chart' }"
-        @click.prevent="activeTab = 'chart'"
-        :title="'Analytics'"
-      >
-        <font-awesome-icon icon="fa-solid fa-chart-line" />
-        Analytics
-      </button>
-
-      <button
-        v-if="isAccountsEnabled && isStoriesEnabled"
-        class="panel-button"
-        :class="{ active: activeTab === 'edit' }"
-        @click.prevent="activeTab = 'edit'"
-        :title="t('sensorpopup.edit') || 'Edit'"
-      >
-        <font-awesome-icon icon="fa-regular fa-comment" />
-        Stories
-      </button>
-
-      <button
-        class="panel-button"
-        :class="{ active: activeTab === 'info' }"
-        @click.prevent="activeTab = 'info'"
-        :title="t('sensorpopup.infotitle')"
-      >
-        <font-awesome-icon icon="fa-regular fa-file-lines" />
-        Info
-      </button>
-      <button
-        class="panel-button"
-        :class="{ active: activeTab === 'sharelink' }"
-        @click.prevent="activeTab = 'sharelink'"
-        :title="t('sensorpopup.sharedefault')"
-      >
-        <font-awesome-icon icon="fa-solid fa-link" />
-        Share
       </button>
     </div>
 
@@ -104,7 +122,7 @@
           </button>
         </div>
 
-        <Analytics :point="point" :log="log" />
+        <Data :point="point" :log="log" />
       </div>
 
       <div v-if="isStoriesEnabled && isAccountsEnabled && activeTab === 'edit'" class="tab-content">
@@ -125,6 +143,50 @@
         <ShareLink :log="log" :point="point" />
       </div>
     </div>
+
+    <div class="sensor-panel">
+      <button
+        class="panel-button"
+        :class="{ active: activeTab === 'chart' }"
+        @click.prevent="activeTab = 'chart'"
+        :title="'Data'"
+      >
+        <font-awesome-icon icon="fa-solid fa-chart-line" />
+        <span>Data</span>
+      </button>
+
+      <button
+        v-if="isAccountsEnabled && isStoriesEnabled"
+        class="panel-button"
+        :class="{ active: activeTab === 'edit' }"
+        @click.prevent="activeTab = 'edit'"
+        :title="t('sensorpopup.edit') || 'Edit'"
+      >
+        <font-awesome-icon icon="fa-regular fa-comment" />
+        <span>Stories</span>
+      </button>
+
+      <button
+        class="panel-button"
+        :class="{ active: activeTab === 'info' }"
+        @click.prevent="activeTab = 'info'"
+        :title="t('sensorpopup.infotitle')"
+      >
+        <font-awesome-icon icon="fa-regular fa-file-lines" />
+        <span>Info</span>
+      </button>
+      <button
+        class="panel-button"
+        :class="{ active: activeTab === 'sharelink' }"
+        @click.prevent="activeTab = 'sharelink'"
+        :title="t('sensorpopup.sharedefault')"
+      >
+        <font-awesome-icon icon="fa-solid fa-link" />
+        <span>Share</span>
+      </button>
+    </div>
+
+
   </div>
 </template>
 
@@ -133,22 +195,15 @@ import { computed, ref, watch, onMounted, onBeforeUnmount } from "vue";
 import { useI18n } from "vue-i18n";
 import { useMap } from "@/composables/useMap";
 import { useSensors } from "@/composables/useSensors";
-import { useBookmarks } from "@/composables/useBookmarks";
 import { getStoriesForSensor, isStoryHidden, storiesLocalKeys } from "@/composables/useStories";
-import { getAvatar } from "@/utils/avatarGenerator";
+import { useSensorBookmark } from "@/composables/useBookmarks";
 import { settings } from "@config";
 import { dayISO, getPeriodBounds } from "@/utils/date";
 
-import Analytics from "./tabs/Analytics.vue";
+import Data from "./tabs/Data.vue";
 import Info from "./tabs/Info.vue";
 import ShareLink from "./tabs/ShareLink.vue";
 import EditStory from "./tabs/EditStory.vue";
-
-// Импортируем изображения типов сенсоров
-import diyIcon from "@/assets/images/sensorTypes/DIY.svg";
-import insightIcon from "@/assets/images/sensorTypes/Insight.svg";
-import urbanIcon from "@/assets/images/sensorTypes/Urban.svg";
-import altruistIcon from "@/assets/images/sensorTypes/Altruist.svg";
 
 const props = defineProps({
   point: Object,
@@ -158,7 +213,6 @@ const emit = defineEmits(["close"]);
 
 const { t, locale } = useI18n();
 const mapState = useMap();
-const { idbBookmarks } = useBookmarks();
 
 const localeComputed = computed(() => localStorage.getItem("locale") || locale.value || "en");
 const sensorsUI = useSensors(localeComputed);
@@ -272,7 +326,7 @@ const sensorStoriesTotalCount = computed(() => {
 
 // Порядок табов для навигации клавиатурой (edit только если accounts включен)
 const tabsOrder = computed(() => {
-  const base = ["chart", "info", "sharelink", "bookmarks"];
+  const base = ["chart", "info", "sharelink"];
   if (isAccountsEnabled.value) {
     base.push("edit");
   }
@@ -304,68 +358,25 @@ const handleKeydown = (event) => {
 
 const sensor_id = computed(() => point.value?.sensor_id || null);
 
-// Аватарка сенсора на основе ID
-const sensorAvatar = ref(null);
-
-// Генерируем аватарку при изменении sensor_id
-watch(
-  sensor_id,
-  (newId) => {
-    if (newId) {
-      getAvatar(newId, 60)
-        .then((avatar) => {
-          sensorAvatar.value = avatar;
-        })
-        .catch((error) => {
-          console.error("Error generating avatar:", error);
-          sensorAvatar.value = null;
-        });
-    } else {
-      sensorAvatar.value = null;
-    }
-  },
-  { immediate: true }
-);
+const {
+  isBookmarked,
+  bookmarkName,
+  showBookmarkForm,
+  openAddForm,
+  startEditing,
+  cancelForm,
+  saveBookmark,
+  deleteBookmark,
+} = useSensorBookmark(sensor_id, {
+  defaultName: () => point.value?.address || sensor_id.value || "",
+});
 
 const geo = computed(() => point.value?.geo || { lat: 0, lng: 0 });
 
 const owner = computed(() => point.value?.owner || null);
 
-// Проверяем, добавлен ли сенсор в закладки
-const isBookmarked = computed(() => {
-  if (!sensor_id.value) return false;
-  return idbBookmarks.value?.some((bookmark) => bookmark.id === sensor_id.value) || false;
-});
-
 // Гарантируем, что logs всегда массив
 const log = computed(() => (Array.isArray(point.value?.logs) ? point.value.logs : null));
-
-// Вычисляем тип сенсора используя функцию из composable
-const sensorType = computed(() => sensorsUI.getSensorType(point.value));
-
-// Вычисляем путь к изображению типа сенсора
-const sensorTypeImage = computed(() => {
-  if (!sensorType.value) return null;
-
-  const typeMap = {
-    diy: diyIcon,
-    insight: insightIcon,
-    urban: urbanIcon,
-    altruist: altruistIcon,
-  };
-
-  return typeMap[sensorType.value] || null;
-});
-
-// Вычисляем ссылку для типа сенсора
-const sensorTypeLink = computed(() => {
-  if (sensorType.value === "diy") {
-    return "https://robonomics.academy/en/learn/sensors-connectivity-course/sensor-hardware/";
-  }
-  return "https://shop.akagi.dev/products/outdoor-sensor-altruist-dev-kit";
-});
-
-// Функции для табов теперь не нужны - переключение происходит через activeTab
 
 const closesensor = () => {
   // Просто эмитим событие закрытия - всю логику обрабатывает Main.vue
@@ -429,30 +440,6 @@ watch(
 </script>
 
 <style scoped>
-/* + Заголовок сенсора: тип, выбор даты, кнопка закрыть */
-
-.sensor-type {
-  width: 30px;
-}
-
-.sensor-type {
-  display: inline-flex;
-  align-items: center;
-  text-decoration: none;
-}
-
-.sensor-type img {
-  width: 100%;
-  display: block;
-}
-
-.sensor-header {
-  display: grid;
-  gap: var(--gap);
-  grid-template-columns: 30px 1fr 30px;
-  align-items: center;
-}
-/* - Заголовок сенсора: тип, выбор даты, кнопка закрыть */
 
 .popup-js.active {
   container: popup / inline-size;
@@ -461,7 +448,8 @@ watch(
   bottom: 0;
   box-sizing: border-box;
   color: var(--color-dark);
-  padding: var(--gap);
+  display: flex;
+  flex-direction: column;
   position: absolute;
   right: 0;
   top: 0;
@@ -472,8 +460,105 @@ watch(
 }
 
 .scrollable-y {
-  max-height: 85%;
+  flex: 1 1 auto;
+  min-height: 0;
+  max-height: none;
+  padding-left: var(--gap);
+  padding-right: var(--gap);
 }
+
+.sensor-header {
+  --close-size: calc(var(--font-size) * 2);
+  flex-shrink: 0;
+  text-align: center;
+  position: relative;
+  background-color: var(--color-light);
+  padding: var(--gap);
+  border-bottom: 2px solid var(--color-dark);
+}
+
+.sensor-header .title {
+  padding-right: calc(var(--close-size) + var(--gap)*2);
+}
+
+.sensor-header h3 {
+  margin-bottom: 0;
+}
+
+.sensor-header .close {
+  border: 0;
+  cursor: pointer;
+  position: absolute;
+  right: var(--gap);
+  top: var(--gap);
+}
+
+.sensor-header .close .fa-xmark {
+  height: var(--close-size);
+}
+
+.sensor-header .title-bookmark-no {
+  display: flex;
+  gap: var(--gap);
+  align-items: center;
+  justify-content: center;
+}
+
+.sensor-header .title-bookmark-add {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  align-items: center;
+  gap: var(--gap) calc(var(--gap) * 0.5);
+}
+
+.sensor-header .title-bookmark-add form {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: var(--gap);
+  min-width: 0;
+}
+
+.sensor-header .title-bookmark-add form input {
+  width: 100%;
+  min-width: 0;
+}
+
+.sensor-header .title-bookmark-add form > div {
+  display: flex;
+  align-items: center;
+  gap: calc(var(--gap) * 0.5);
+}
+
+.sensor-header .title-bookmark-add form .button {
+  height: 40px;
+  padding-left: calc(var(--app-inputpadding) * 1.2);
+  padding-right: calc(var(--app-inputpadding) * 1.2);
+}
+
+.sensor-header .title-bookmark-add .text-small {
+  grid-column: 1 / -1;
+}
+
+.sensor-header .title-bookmark-added h3 button {
+  background: none;
+  border: 0;
+  cursor: pointer;
+  font: inherit;
+  font-weight: inherit;
+  color: inherit;
+  padding: 0;
+  display: inline-flex;
+  align-items: center;
+  gap: calc(var(--gap) * 0.5);
+  max-width: 100%;
+  text-align: center;
+}
+
+.sensor-header .text-small {
+  font-size: 0.85em;
+  opacity: 0.75;
+}
+
 
 /* Стили скелетона для заглушки графика */
 .chart-skeleton {
@@ -524,21 +609,6 @@ watch(
   }
 }
 
-@media screen and (max-width: 700px) {
-  .popup-js.active {
-    left: 0;
-    width: 100%;
-    top: 0;
-  }
-}
-
-@container popup (max-width: 400px) {
-  h3.flexline {
-    max-width: calc(100% - var(--gap) * 3);
-  }
-}
-
-/* shared container */
 
 /* + scales */
 .scalegrid {
@@ -592,50 +662,20 @@ watch(
   text-align: center;
 }
 
-.sensor-info-title {
-  display: flex;
-  gap: var(--gap);
-  align-items: center;
-  margin-bottom: 0;
-  justify-content: center;
-}
-
-@media screen and (width < 700px) {
-  .sensor-header {
-    align-items: start;
-    justify-content: start;
-    gap: calc(var(--gap) * 3);
-  }
-
-  .sensor-info-title {
-    flex-direction: column;
-    text-align: center;
-  }
-}
-.sensor-info-title h3 {
-  margin-bottom: 0;
-}
-
-.sensor-avatar {
-  width: 40px;
-  height: 40px;
-  border-radius: 50%;
-  object-fit: cover;
-  display: inline-block;
-}
-
 .sensor-panel {
+  flex-shrink: 0;
   display: flex;
-  justify-content: center;
+  justify-content: space-around;
   gap: calc(var(--gap) * 0.5);
   flex-wrap: wrap;
-  border-bottom: 2px solid var(--color-dark);
-  margin-top: calc(var(--gap) * 2);
+  border-top: 2px solid var(--color-dark);
+  background-color: var(--color-light);
+  box-shadow: 0 -6px 12px 0 rgba(0, 0, 0, 0.1);
 }
 
 .panel-button {
   background: transparent;
-  border: 2px solid transparent;
+  border: none !important;
   cursor: pointer;
   padding: calc(var(--gap) * 0.5) calc(var(--gap) * 1.5);
   color: var(--color-text);
@@ -645,7 +685,7 @@ watch(
   justify-content: center;
   position: relative;
   top: 2px;
-  font-size: var(--font-size);
+  font-size: calc(var(--font-size) * 1.2);
   gap: calc(var(--gap) * 0.5);
   font-weight: 600;
 }
@@ -713,16 +753,22 @@ watch(
   font-weight: 600;
 }
 
-.localbutton-close {
-  border: 0;
-  cursor: pointer;
-}
-
-.localbutton-close .fa-xmark {
-  height: calc(var(--font-size) * 2);
-}
-
 .sensor-info-desc {
   text-align: center;
+}
+
+@media screen and (width < 700px) {
+
+  .popup-js.active {
+    left: 0;
+    width: 100%;
+    top: 0;
+  }
+
+
+  .panel-button, .panel-button span {
+    display: block;
+  }
+
 }
 </style>

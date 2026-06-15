@@ -208,7 +208,8 @@ export function generateAvatarSync(id, size = 40) {
 }
 
 /**
- * Предзагружает аватарку и возвращает Promise
+ * Предзагружает аватарку и возвращает Promise.
+ * TODO(sensor Info tab): показывать аватар owner во вкладке Info (`tabs/Info.vue`).
  * @param {string} id - ID сенсора
  * @param {number} size - Размер аватарки
  * @returns {Promise<string>} Promise с data URL аватарки

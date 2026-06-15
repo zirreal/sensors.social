@@ -20,14 +20,11 @@
 <script setup>
 import { computed, onMounted, onUnmounted } from "vue";
 import { useRouter, useRoute } from "vue-router";
-import { useBookmarks } from "@/composables/useBookmarks";
-import { IDBdeleteByKey, notifyDBChange } from "../utils/idb";
-import { settings, idbschemas } from "@config";
+import { useBookmarks, removeSensorBookmark } from "@/composables/useBookmarks";
+import { idbschemas } from "@config";
 // import { getTypeProvider } from "@/utils/utils"; // deprecated
 
 const schema = idbschemas?.Sensors;
-const DB_NAME = schema?.dbname;
-const STORE = Object.keys(schema?.stores || {}).find((key) => key === "bookmarks") || null;
 
 const router = useRouter();
 const route = useRoute();
@@ -35,13 +32,7 @@ const { idbBookmarks, idbBookmarkGet, watchBookmarks } = useBookmarks();
 const bookmarks = computed(() => idbBookmarks.value);
 
 async function deletebookmark(id) {
-  await IDBdeleteByKey(DB_NAME, STORE, id);
-  notifyDBChange(DB_NAME, STORE);
-
-  const el = document.querySelector(`[data-id="${id}"]`);
-  if (el && el.classList.contains("sensor-bookmarked")) {
-    el.classList.remove("sensor-bookmarked");
-  }
+  await removeSensorBookmark(id);
 }
 
 function getlink(bookmark) {

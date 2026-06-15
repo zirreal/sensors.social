@@ -2,7 +2,7 @@ import { ref, computed, watch, nextTick } from "vue";
 import { useRouter, useRoute } from "vue-router";
 
 import { useMap } from "@/composables/useMap";
-import { useBookmarks } from "@/composables/useBookmarks";
+import { isSensorBookmarked } from "@/composables/useBookmarks";
 
 import { pinned_sensors, excluded_sensors, settings } from "@config";
 import * as sensorsUtils from "../utils/map/sensors";
@@ -18,7 +18,6 @@ import {
   filterOwnerBundleNearAnchor,
   filterBundleOptionsForOwner,
   preloadSensorMeta,
-  classifySensorTypeFromLogSamples,
   logSamplesHaveCo2,
   getCachedSensorMeta,
   clearSensorMetaCache,
@@ -387,7 +386,6 @@ export function useSensors(localeComputed) {
 
   const mapState = useMap();
 
-  const { idbBookmarks } = useBookmarks();
   const router = useRouter();
   const route = useRoute();
 
@@ -1397,7 +1395,7 @@ export function useSensors(localeComputed) {
       owner: basePoint.owner || null,
       timestamp: basePoint.timestamp ?? null,
       ownerSensorsWithData: basePoint.ownerSensorsWithData ?? null,
-      isBookmarked: basePoint.isBookmarked || false,
+      isBookmarked: isSensorBookmarked(basePoint.sensor_id),
       logs: Array.isArray(basePoint.logs)
         ? sanitizeSensorLogsPmSentinels(basePoint.logs)
         : basePoint.logs ?? null,
@@ -2043,10 +2041,6 @@ export function useSensors(localeComputed) {
         ? Object.fromEntries(Object.entries(point.data).map(([k, v]) => [k.toLowerCase(), v]))
         : {};
 
-      // Устанавливаем закладку
-      point.isBookmarked =
-        idbBookmarks.value?.some((bookmark) => bookmark.id === point.sensor_id) || false;
-
       const ownerKey = normalizeOwnerKey(point);
       if (ownerKey) {
         const popupOwner = normalizeOwnerKey(sensorPoint.value);
@@ -2412,73 +2406,6 @@ export function useSensors(localeComputed) {
     sensorsLoaded.value = false;
   };
 
-  /**
-   * Проверяет наличие значения в данных (не undefined и не null)
-   * @param {*} value - Значение для проверки
-   * @returns {boolean} true если значение существует
-   */
-  const hasValue = (value) => {
-    return value !== undefined && value !== null;
-  };
-
-  /**
-   * Определяет наличие co2 и шума в текущих данных (для realtime)
-   * @param {Object} data - Текущие данные сенсора
-   * @returns {Object} Объект с hasCo2 и hasNoise
-   */
-  const checkCurrentData = (data) => {
-    if (!data) {
-      return { hasCo2: false, hasNoise: false };
-    }
-
-    return {
-      hasCo2: hasValue(data.co2),
-      hasNoise: hasValue(data.noiseavg) || hasValue(data.noisemax),
-    };
-  };
-
-  /**
-   * Определяет тип сенсора на основе owner и данных
-   * @param {Object} point - Данные сенсора
-   * @returns {string} Тип сенсора: 'diy', 'insight', 'urban', 'altruist'
-   */
-  const getSensorType = (point) => {
-    if (!point) return "diy";
-
-    // Если нет owner -> 'diy'
-    if (!point.owner) {
-      return "diy";
-    }
-
-    const logs = point.logs;
-    const isRealtime = mapState.currentProvider.value === "realtime";
-
-    // Приоритет: сначала проверяем логи, если есть (та же классификация co2/noise, вынесена в classifySensorTypeFromLogSamples)
-    if (Array.isArray(logs) && logs.length > 0) {
-      return classifySensorTypeFromLogSamples(logs);
-    }
-
-    let hasCo2 = false;
-    let hasNoise = false;
-    if (isRealtime && point.data) {
-      const currentData = checkCurrentData(point.data);
-      hasCo2 = currentData.hasCo2;
-      hasNoise = currentData.hasNoise;
-    }
-
-    // Определяем тип на основе наличия co2 и шума
-    if (hasCo2 && !hasNoise) {
-      return "insight";
-    }
-
-    if (!hasCo2 && hasNoise) {
-      return "urban";
-    }
-
-    // Если есть owner, но нет данных для определения типа -> 'altruist'
-    return "altruist";
-  };
-
   return {
     // State
     sensorPoint,
@@ -2516,6 +2443,5 @@ export function useSensors(localeComputed) {
     setSensorsNoLocation,
     clearSensors,
     clearSensorLogs,
-    getSensorType,
   };
 }

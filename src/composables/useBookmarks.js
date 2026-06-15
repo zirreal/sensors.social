@@ -1,5 +1,12 @@
-import { ref } from "vue";
-import { IDBgettable, watchDBChange, migrateDB, IDBworkflow } from "../utils/idb";
+import { ref, computed, watch, unref } from "vue";
+import {
+  IDBgettable,
+  IDBworkflow,
+  IDBdeleteByKey,
+  notifyDBChange,
+  watchDBChange,
+  migrateDB,
+} from "../utils/idb";
 import { idbschemas } from "@config";
 
 // Проверяем наличие конфигурации для новой базы данных
@@ -20,6 +27,102 @@ const OLD_STORE = oldSchema
 
 // Глобальное состояние для закладок
 const idbBookmarks = ref([]);
+
+/** Есть ли сенсор в закладках (единый источник для маркеров и UI). */
+export function isSensorBookmarked(sensorId) {
+  if (!sensorId) return false;
+  const sid = String(sensorId);
+  return (idbBookmarks.value || []).some(
+    (bookmark) => bookmark?.id === sid && !bookmark?.temp
+  );
+}
+
+/** Класс sensor-bookmarked на маркере карты. */
+function syncMarkerBookmarkClass(sensorId, isBookmarked) {
+  if (!sensorId) return;
+  const sensorElement = document.querySelector(`[data-id="${sensorId}"]`);
+  if (!sensorElement) return;
+  sensorElement.classList.toggle("sensor-bookmarked", Boolean(isBookmarked));
+}
+
+/** Перечитывает список закладок в idbBookmarks. */
+async function refreshBookmarksList() {
+  if (!schema || !DB_NAME || !STORE) {
+    idbBookmarks.value = [];
+    return;
+  }
+
+  try {
+    idbBookmarks.value = (await IDBgettable(DB_NAME, STORE)).filter(
+      (bookmark) => bookmark?.id && bookmark.id !== "init" && !bookmark.temp
+    );
+  } catch (error) {
+    console.error("Error loading bookmarks:", error);
+    idbBookmarks.value = [];
+  }
+}
+
+/** Закладка по sensor_id: сначала кэш, иначе IndexedDB. */
+async function findBookmarkBySensorId(sensorId) {
+  const sid = sensorId ? String(sensorId) : null;
+  if (!sid || !DB_NAME || !STORE) return null;
+
+  const fromCache = idbBookmarks.value.find((bookmark) => bookmark.id === sid);
+  if (fromCache) return fromCache;
+
+  const bookmarks = await IDBgettable(DB_NAME, STORE);
+  return bookmarks.find((bookmark) => bookmark.id === sid) || null;
+}
+
+/** Создаёт или обновляет закладку сенсора. */
+async function upsertSensorBookmark(sensorId, name) {
+  if (!sensorId || !DB_NAME || !STORE) return;
+
+  const sid = String(sensorId);
+  const existing = await findBookmarkBySensorId(sid);
+
+  if (existing) {
+    await new Promise((resolve, reject) => {
+      IDBworkflow(DB_NAME, STORE, "readwrite", (store) => {
+        const request = store.get(sid);
+
+        request.addEventListener("error", (e) => reject(e));
+        request.addEventListener("success", (e) => {
+          const data = e.target.result;
+          data.name = name;
+          const requestUpdate = store.put(data);
+
+          requestUpdate.addEventListener("error", (e) => reject(e));
+          requestUpdate.addEventListener("success", () => resolve());
+        });
+      });
+    });
+  } else {
+    await new Promise((resolve, reject) => {
+      IDBworkflow(DB_NAME, STORE, "readwrite", (store) => {
+        const request = store.add({ name, id: sid });
+
+        request.addEventListener("error", (e) => reject(e));
+        request.addEventListener("success", () => resolve());
+      });
+    });
+  }
+
+  notifyDBChange(DB_NAME, STORE);
+  await refreshBookmarksList();
+  syncMarkerBookmarkClass(sid, true);
+}
+
+/** Удаляет закладку сенсора. */
+export async function removeSensorBookmark(sensorId) {
+  const sid = sensorId ? String(sensorId) : null;
+  if (!sid || !DB_NAME || !STORE) return;
+
+  await IDBdeleteByKey(DB_NAME, STORE, sid);
+  syncMarkerBookmarkClass(sid, false);
+  notifyDBChange(DB_NAME, STORE);
+  await refreshBookmarksList();
+}
 
 // Автоматическая миграция при запуске приложения
 const autoMigrate = async () => {
@@ -107,16 +210,11 @@ export function useBookmarks() {
         }
       }
 
-      idbBookmarks.value = await IDBgettable(DB_NAME, STORE);
+      await refreshBookmarksList();
     } catch (error) {
       console.error("Error in idbBookmarkGet:", error);
       // Fallback: пытаемся получить данные напрямую
-      try {
-        idbBookmarks.value = await IDBgettable(DB_NAME, STORE);
-      } catch (fallbackError) {
-        console.error("Fallback also failed:", fallbackError);
-        idbBookmarks.value = [];
-      }
+      await refreshBookmarksList();
     }
   };
 
@@ -158,7 +256,7 @@ export function useBookmarks() {
 
       if (success) {
         // Обновляем данные
-        idbBookmarks.value = await IDBgettable(DB_NAME, STORE);
+        await refreshBookmarksList();
       }
 
       return success;
@@ -173,5 +271,129 @@ export function useBookmarks() {
     idbBookmarkGet,
     watchBookmarks,
     forceMigration,
+  };
+}
+
+/**
+ * UI-состояние и CRUD закладки одного сенсора (шапка попапа, виджет Bookmark).
+ */
+export function useSensorBookmark(sensorIdSource, { defaultName = () => "" } = {}) {
+  const isBookmarked = ref(false);
+  const bookmarkName = ref("");
+  const savedBookmarkName = ref("");
+  const isEditing = ref(false);
+  const isAdding = ref(false);
+
+  const showBookmarkForm = computed(() => isAdding.value || isEditing.value);
+
+  const resolveSensorId = () => {
+    const id = unref(sensorIdSource);
+    return id ? String(id) : null;
+  };
+
+  const resolveDefaultName = () => {
+    const name = typeof defaultName === "function" ? defaultName() : defaultName;
+    return name != null ? String(name).trim() : "";
+  };
+
+  function applyBookmarkState({ resetForm = false } = {}) {
+    // Синхронизируем локальное UI-состояние с idbBookmarks, не сбрасывая открытую форму.
+    const sid = resolveSensorId();
+
+    if (resetForm) {
+      isEditing.value = false;
+      isAdding.value = false;
+    }
+
+    if (!sid) {
+      isBookmarked.value = false;
+      bookmarkName.value = "";
+      savedBookmarkName.value = "";
+      isEditing.value = false;
+      isAdding.value = false;
+      return;
+    }
+
+    const bookmark = idbBookmarks.value.find((item) => item.id === sid);
+    if (bookmark) {
+      isBookmarked.value = true;
+      if (!isAdding.value && !isEditing.value) {
+        bookmarkName.value = bookmark.name || "";
+        savedBookmarkName.value = bookmark.name || "";
+      }
+      return;
+    }
+
+    isBookmarked.value = false;
+    if (!isAdding.value && !isEditing.value) {
+      bookmarkName.value = "";
+      savedBookmarkName.value = "";
+    }
+  }
+
+  function openAddForm() {
+    if (isBookmarked.value) return;
+    isAdding.value = true;
+    bookmarkName.value = "";
+  }
+
+  function startEditing() {
+    if (!isBookmarked.value) return;
+    savedBookmarkName.value = bookmarkName.value;
+    isEditing.value = true;
+  }
+
+  function cancelForm() {
+    if (isEditing.value) {
+      bookmarkName.value = savedBookmarkName.value;
+      isEditing.value = false;
+      return;
+    }
+    isAdding.value = false;
+    bookmarkName.value = "";
+  }
+
+  async function saveBookmark() {
+    const sid = resolveSensorId();
+    if (!sid) return;
+
+    if (!bookmarkName.value.trim()) {
+      bookmarkName.value = resolveDefaultName() || sid;
+    }
+
+    await upsertSensorBookmark(sid, bookmarkName.value.trim());
+
+    isBookmarked.value = true;
+    isEditing.value = false;
+    isAdding.value = false;
+    savedBookmarkName.value = bookmarkName.value;
+  }
+
+  async function deleteBookmark() {
+    const sid = resolveSensorId();
+    if (!sid) return;
+
+    try {
+      await removeSensorBookmark(sid);
+      applyBookmarkState({ resetForm: true });
+    } catch (error) {
+      console.error("Error deleting bookmark:", error);
+    }
+  }
+
+  watch(sensorIdSource, () => applyBookmarkState({ resetForm: true }), { immediate: true });
+  watch(idbBookmarks, () => applyBookmarkState(), { deep: true });
+
+  return {
+    isBookmarked,
+    bookmarkName,
+    savedBookmarkName,
+    showBookmarkForm,
+    isEditing,
+    openAddForm,
+    startEditing,
+    cancelForm,
+    saveBookmark,
+    deleteBookmark,
   };
 }
