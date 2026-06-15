@@ -179,6 +179,11 @@ watch(
 .blog-post__content a > img {
   cursor: pointer;
 }
+
+.blog-post .grid > p {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+}
 </style>
 
 <style scoped>
