@@ -547,6 +547,11 @@ export default {
   "probably something happened with your sensor": "probably something happened with your sensor",
   "logs_health_unhealthy_period":
     "{groups} for the selected period could be measured wrong. This can be due to the sensor malfunctioning or incorrect device setup.",
+  "logs_health_unhealthy_period_rest":
+    " for the selected period could be measured wrong. This can be due to the sensor malfunctioning or incorrect device setup.",
+  "logs_health_unhealthy_support_lead": "If you need help, contact ",
+  "logs_health_unhealthy_support_link": "support",
+  "logs_health_badge_short": "This data might be wrong",
   "logs_health_device_hid_warnings": "This device shows wrong measurements.",
   "logs_health_show_warnings_for_period": "Show warnings for selected period",
   "Don't show any data warnings for this device": "Don't show any data warnings for this device",

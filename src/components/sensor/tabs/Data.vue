@@ -5,8 +5,7 @@
       <SensorPicker v-if="isSensorPickerReady" :point="point" :log="log" />
       <div v-else class="panel-skeleton panel-skeleton--trigger" aria-hidden="true" />
 
-      <Timeline v-if="!isLogsLoading" :log="log" :point="point" />
-      <div v-else class="panel-skeleton panel-skeleton--timeline" aria-hidden="true" />
+      <Timeline :log="log" :point="point" />
 
       <button
         v-if="ownerKey"
@@ -78,26 +77,14 @@
         </div>
       </div>
 
-      <div v-if="showLogsHealthWarningBanner" class="logs-health-warning-banner">
-        <div>
-          <span>{{
-            $t("logs_health_unhealthy_period", { groups: unhealthyGroupsListDisplay })
-          }}</span>
-          <a href="#" @click.prevent="onLogsHealthDontShowWarningsForSensor">
-            {{ t("Don't show any data warnings for this device") }}
-          </a>
-        </div>
-
-        <button
-          type="button"
-          class="button button-round-outline"
-          @click="onLogsHealthShowDataAnyway"
-        >
-          <font-awesome-icon icon="fa-solid fa-xmark" />
-        </button>
+      <div v-if="chartHasData" class="chart-area">
+        <ChartHealthWarning
+          :visible="showLogsHealthWarningBadge"
+          :popover-id="chartHealthWarningPopoverId"
+          :groups="unhealthyGroupsListDisplay"
+        />
+        <Chart :log="log" @active-legend-change="chartActiveLegendKey = $event" />
       </div>
-
-      <Chart v-if="chartHasData" :log="log" />
       <div v-else-if="showNoDataMessage" class="no-data-message">
         {{ $t("No data available") }}
       </div>
@@ -162,21 +149,19 @@
 import { computed, ref, watch } from "vue";
 import { useI18n } from "vue-i18n";
 import { useMap } from "@/composables/useMap";
-import { useSensors, formatSensorIdShort, isPanelSensorPickerReady, isPanelOwnerLoading, isSensorLogsLoading } from "@/composables/useSensors";
+import { useSensors, formatSensorIdShort, isPanelSensorPickerReady, isPanelOwnerLoading } from "@/composables/useSensors";
 import { useAccounts } from "@/composables/useAccounts";
 import { getAvatar } from "@/utils/avatarGenerator";
 import {
   clearAllLogsHealthUserHide,
   loadLogsHealth,
-  setLogsHealthDayUserHide,
-  setLogsHealthSensorUserHide,
   useLogsHealth,
 } from "@/utils/calculations/sensor/logs_health.js";
-import { enumeratePeriodDates } from "@/utils/date";
 import measurements from "../../../measurements";
 
 import AQI from "../widgets/AQI.vue";
 import Chart from "../widgets/Chart.vue";
+import ChartHealthWarning from "../widgets/ChartHealthWarning.vue";
 import SensorPicker from "../widgets/SensorPicker.vue";
 import Timeline from "../widgets/Timeline.vue";
 // import NativeShare from "../widgets/NativeShare.vue";
@@ -199,12 +184,6 @@ const ownerPlaceholderMeta = formatSensorIdShort("000000000000000000000000000000
 
 const isSensorPickerReady = computed(() => isPanelSensorPickerReady(props.point));
 const isOwnerLoading = computed(() => isPanelOwnerLoading(props.point));
-const isLogsLoading = computed(() =>
-  isSensorLogsLoading(props.point, props.log, {
-    provider: mapState.currentProvider.value,
-    timelineMode: mapState.timelineMode.value,
-  })
-);
 
 const isOwnerLoggedIn = computed(() => {
   const owner = ownerKey.value;
@@ -223,19 +202,35 @@ watch(
 
 const chartLogsHealthUi = computed(() => (runLogsHealth.value ? logsHealth.value : null));
 
-/** Подписи категорий (pm / climate / noise), у которых за видимый период healthy === false */
-const unhealthyGroupLabels = computed(() => {
+/** Chart legend key → logsHealth aggregate key */
+const CHART_LEGEND_TO_HEALTH = {
+  dust: "pm",
+  climate: "climate",
+  noise: "noise",
+};
+
+const CHART_HEALTH_LABELS = {
+  pm: "Dust & Particles",
+  climate: "Climate",
+  noise: "Noise",
+};
+
+const chartActiveLegendKey = ref(null);
+
+const chartHealthWarningPopoverId = computed(
+  () => `chart-health-warning-${String(props.point?.sensor_id || "sensor")}`
+);
+
+/** Unhealthy category for the active chart tab only (not all groups in the period). */
+const activeUnhealthyGroupLabels = computed(() => {
   const lh = chartLogsHealthUi.value;
-  if (!lh) return [];
-  const rows = [
-    { cat: "pm", labelKey: "Dust & Particles" },
-    { cat: "climate", labelKey: "Climate" },
-    { cat: "noise", labelKey: "Noise" },
-  ];
-  return rows.filter(({ cat }) => lh[cat]?.healthy === false).map(({ labelKey }) => t(labelKey));
+  const healthCat = CHART_LEGEND_TO_HEALTH[chartActiveLegendKey.value];
+  if (!lh || !healthCat || lh[healthCat]?.healthy !== false) return [];
+  const labelKey = CHART_HEALTH_LABELS[healthCat];
+  return labelKey ? [t(labelKey)] : [];
 });
 
-const unhealthyGroupsListDisplay = computed(() => unhealthyGroupLabels.value.join(", "));
+const unhealthyGroupsListDisplay = computed(() => activeUnhealthyGroupLabels.value.join(", "));
 
 const logsHealthSensorUserHide = computed(() =>
   Boolean(
@@ -257,36 +252,24 @@ const onShowSensorWarningsAgain = async () => {
   await loadLogsHealth(id, props.log, logsHealthReloadContext());
 };
 
-/** Как бывший оверлей Chart: скрыть предупреждения по дням выбранного периода */
-const onLogsHealthShowDataAnyway = async () => {
-  const id = props.point?.sensor_id;
-  if (!id || !runLogsHealth.value) return;
-  const mode = mapState.timelineMode.value;
-  const dates = enumeratePeriodDates(mapState.currentDate.value, mode);
-  for (const dayIso of dates) {
-    await setLogsHealthDayUserHide(id, dayIso, true);
-  }
-  await loadLogsHealth(id, props.log, logsHealthReloadContext());
-};
-
-const onLogsHealthDontShowWarningsForSensor = async () => {
-  const id = props.point?.sensor_id;
-  if (!id || !runLogsHealth.value) return;
-  await setLogsHealthSensorUserHide(id, true);
-  await loadLogsHealth(id, props.log, logsHealthReloadContext());
-};
-
 const hasLogs = computed(() => Array.isArray(props.log) && props.log.length > 0);
 
 // Same source as `log` from parent: `null` = loading → skeleton; `[]` = empty → message; data → chart
 const chartHasData = computed(() => Array.isArray(props.log) && props.log.length > 0);
 
-const showLogsHealthWarningBanner = computed(
+watch(
+  () => chartHasData.value,
+  (hasData) => {
+    if (!hasData) chartActiveLegendKey.value = null;
+  }
+);
+
+const showLogsHealthWarningBadge = computed(
   () =>
     runLogsHealth.value &&
     hasLogs.value &&
     chartHasData.value &&
-    unhealthyGroupLabels.value.length > 0 &&
+    activeUnhealthyGroupLabels.value.length > 0 &&
     !logsHealthSensorUserHide.value
 );
 
@@ -524,44 +507,25 @@ watch(
   color: var(--color-dark);
 }
 
+.chart-area {
+  position: relative;
+}
+
 .logs-health-warning-banner {
   padding: var(--gap);
   border-radius: var(--radius-sm);
   background-color: color-mix(in srgb, var(--color-orange) 22%, transparent);
   border: 1px solid color-mix(in srgb, var(--color-orange) 45%, transparent);
   margin-bottom: var(--gap);
-  display: grid;
-  grid-template-columns: auto auto;
-  gap: var(--gap);
-  align-items: start;
-  justify-content: space-between;
-}
-
-.logs-health-warning-banner .button-round-outline {
-  background-color: transparent;
-}
-
-.logs-health-warning-banner > div {
-  display: flex;
-  flex-direction: column;
-  gap: calc(var(--gap) * 0.8);
 }
 
 .logs-health-warning-banner a {
-  align-self: flex-start;
-  text-decoration: none;
-  border-bottom: 1px dashed var(--color-red);
-  color: var(--color-red);
-  font-weight: bold;
-}
-
-.logs-health-warning-banner button {
-  width: calc(var(--app-inputheight) * 0.8);
-  height: calc(var(--app-inputheight) * 0.8);
+  color: var(--color-blue);
+  font-size: 0.85em;
 }
 
 .logs-health-userhide-notice {
-  grid-template-columns: 1fr;
+  font-size: 0.9em;
 }
 
 .bugged-sensor {

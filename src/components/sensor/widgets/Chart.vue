@@ -78,6 +78,8 @@ Highcharts.setOptions({
 const props = defineProps({
   log: { type: Array, default: () => [] },
 });
+
+const emit = defineEmits(["activeLegendChange"]);
 const safeLog = computed(() => (Array.isArray(props.log) ? props.log : []));
 
 const route = useRoute();
@@ -169,6 +171,14 @@ const activeLegendKey = computed(() => {
 
   return visibleLegend.value[0]?.key || null;
 });
+
+watch(
+  activeLegendKey,
+  (key) => {
+    emit("activeLegendChange", key);
+  },
+  { immediate: true }
+);
 
 const isRealtime = computed(() => mapState.timelineMode.value === "realtime");
 
