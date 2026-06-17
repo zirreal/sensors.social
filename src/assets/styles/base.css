@@ -1119,6 +1119,12 @@ table img {
   color: var(--color-blue);
 }
 
+.panel-trigger--placeholder {
+  visibility: hidden;
+  pointer-events: none;
+  user-select: none;
+}
+
 /* Narrow panel: icon-only triggers (popover content unchanged) */
 @container sensor-panel (width < 825px) {
   .panel-trigger:not(.sensor-timeline-modes--compact) .panel-list__text {

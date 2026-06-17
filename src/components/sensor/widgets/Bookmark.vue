@@ -75,8 +75,8 @@ const {
   saveBookmark,
   deleteBookmark,
   savedBookmarkName,
-} = useSensorBookmark(sensorId, {
-  defaultName: () => props.point?.address || props.point?.sensor_id || "",
+} = useSensorBookmark(() => props.point, {
+  defaultName: () => props.point?.address || sensorId.value || "",
 });
 
 const hasUnsavedChanges = computed(

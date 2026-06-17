@@ -83,6 +83,11 @@ export function normalizeOwnerKey(item) {
   return String(item?.owner || item?.donated_by || "").trim();
 }
 
+/** True when sensor has an explicit `owner` field (ignores `donated_by`; used for DIY). */
+export function hasSensorOwner(item) {
+  return Boolean(String(item?.owner || "").trim());
+}
+
 export function logSamplesHaveCo2(samples) {
   if (!Array.isArray(samples) || samples.length === 0) return false;
   for (const item of samples) {
@@ -392,7 +397,7 @@ export async function getSensors(start, end, provider = "remote") {
         geo: { lat, lng },
         address: sensorData.address || null,
         donated_by: sensorData.donated_by || null,
-        owner: normalizeOwnerKey(sensorData) || null,
+        owner: String(sensorData.owner || "").trim() || null,
         device_model: sensorData.device_model || null,
         timestamp: sensorData.timestamp || null,
       };

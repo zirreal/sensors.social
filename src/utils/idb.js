@@ -35,7 +35,7 @@ function getStoreConfig(dbname, dbtable) {
     - onsuccess: функция(store), где store — экземпляр objectStore
     Используй для операций записи/изменения одной или нескольких записей.
     Пример:
-        IDBworkflow('SensorsDBBookmarks', 'bookmarks', 'readwrite', store => { store.put({...}) })
+        IDBworkflow('Sensors', 'bookmarks', 'readwrite', store => { store.put({...}) })
 */
 export function IDBworkflow(dbname, dbtable, mode, onsuccess) {
   const dbconf = getDBConfig(dbname);
@@ -93,7 +93,7 @@ export function IDBworkflow(dbname, dbtable, mode, onsuccess) {
     IDBgettable(dbname, dbtable)
     Возвращает Promise со всеми записями objectStore из выбранной БД в виде массива.
     Пример:
-        IDBgettable('SensorsDBBookmarks', 'bookmarks').then(arr => ...)
+        IDBgettable('Sensors', 'bookmarks').then(arr => ...)
 */
 export function IDBgettable(dbname, dbtable) {
   return new Promise((resolve) => {
@@ -138,7 +138,7 @@ export function IDBgetByKey(dbname, dbtable, key) {
     Удаляет одну запись по ключу из выбранной БД/objectStore.
     Возвращает Promise, который resolve после удаления.
     Пример:
-        IDBdeleteByKey('SensorsDBBookmarks', 'bookmarks', 5)
+        IDBdeleteByKey('Sensors', 'bookmarks', 5)
 */
 export function IDBdeleteByKey(dbname, dbtable, key) {
   return new Promise((resolve, reject) => {
@@ -155,7 +155,7 @@ export function IDBdeleteByKey(dbname, dbtable, key) {
     Очищает objectStore полностью в выбранной БД.
     Не возвращает ничего, просто очищает.
     Пример:
-        IDBcleartable('SensorsDBBookmarks', 'bookmarks')
+        IDBcleartable('Sensors', 'bookmarks')
 */
 export function IDBcleartable(dbname, dbtable) {
   IDBworkflow(dbname, dbtable, "readwrite", (store) => {

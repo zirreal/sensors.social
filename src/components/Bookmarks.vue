@@ -20,9 +20,8 @@
 <script setup>
 import { computed, onMounted, onUnmounted } from "vue";
 import { useRouter, useRoute } from "vue-router";
-import { useBookmarks, removeSensorBookmark } from "@/composables/useBookmarks";
+import { useBookmarks, removeBookmarkById, isLegacyBookmarkRecord } from "@/composables/useBookmarks";
 import { idbschemas } from "@config";
-// import { getTypeProvider } from "@/utils/utils"; // deprecated
 
 const schema = idbschemas?.Sensors;
 
@@ -32,26 +31,39 @@ const { idbBookmarks, idbBookmarkGet, watchBookmarks } = useBookmarks();
 const bookmarks = computed(() => idbBookmarks.value);
 
 async function deletebookmark(id) {
-  await removeSensorBookmark(id);
+  await removeBookmarkById(id);
 }
 
 function getlink(bookmark) {
   if (!bookmark?.id) return "#";
 
-  // Берем все параметры из текущего URL и меняем только sensor
+  const query = { ...route.query };
+
+  if (!isLegacyBookmarkRecord(bookmark) && bookmark.lat != null && bookmark.lng != null) {
+    query.lat = String(bookmark.lat);
+    query.lng = String(bookmark.lng);
+    query.zoom = query.zoom || "18";
+    if (bookmark.owner) {
+      query.owner = bookmark.owner;
+    } else {
+      delete query.owner;
+    }
+    if (bookmark.sensorId) {
+      query.sensor = bookmark.sensorId;
+    }
+  } else {
+    query.sensor = bookmark.id;
+  }
+
   return router.resolve({
     name: "main",
-    query: {
-      ...route.query, // Все текущие параметры URL
-      sensor: bookmark.id, // Используем id вместо link
-    },
+    query,
   }).href;
 }
 
 function showsensor(bookmark) {
   const href = getlink(bookmark);
   if (!href || href === "#") return;
-  // Полная навигация с заменой записи в истории и принудительным перезапуском приложения
   window.location.replace(href);
 }
 

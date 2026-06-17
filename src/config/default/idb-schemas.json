@@ -15,12 +15,5 @@
       "bookmarks": { "keyPath": "id", "autoIncrement": true },
       "logsHealth": { "keyPath": "id", "autoIncrement": false }
     }
-  },
-  "SensorsDBBookmarks": {
-    "dbname": "SensorsDBBookmarks",
-    "dbversion": 6,
-    "stores": {
-      "bookmarks": { "keyPath": "id", "autoIncrement": true }
-    }
   }
 }

@@ -369,7 +369,7 @@ const {
   cancelForm,
   saveBookmark,
   deleteBookmark,
-} = useSensorBookmark(sensor_id, {
+} = useSensorBookmark(point, {
   defaultName: () => point.value?.address || sensor_id.value || "",
 });
 

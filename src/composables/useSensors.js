@@ -3,7 +3,7 @@ import { useRouter, useRoute } from "vue-router";
 
 import { useMap } from "@/composables/useMap";
 import { peekUserSensorsCache, getUserSensorsList } from "@/composables/useAccounts";
-import { isSensorBookmarked } from "@/composables/useBookmarks";
+import { isPointBookmarked, refreshAllMarkerBookmarkHighlights } from "@/composables/useBookmarks";
 
 import { pinned_sensors, excluded_sensors, settings } from "@config";
 import * as sensorsUtils from "../utils/map/sensors";
@@ -28,6 +28,7 @@ import {
   countMapMarkersFromList,
   countLiveRealtimeMapMarkers,
   normalizeOwnerKey,
+  hasSensorOwner,
   haversineKm,
   OWNER_GEO_CLUSTER_KM,
   sensorTypeFromDeviceModel,
@@ -125,7 +126,7 @@ function classifySensorTypeFromLiveData(data) {
 export function resolveSensorType(point, logSamples = null) {
   if (!point) return "diy";
 
-  if (!normalizeOwnerKey(point)) return "diy";
+  if (!hasSensorOwner(point)) return "diy";
 
   if (point.idbSensorType) return point.idbSensorType;
 
@@ -168,7 +169,7 @@ export function isPanelSensorPickerReady(point) {
   const sid = String(point?.sensor_id || "");
   if (!sid) return false;
   if (point.device_model || point.idbSensorType) return true;
-  if (normalizeOwnerKey(point)) {
+  if (hasSensorOwner(point)) {
     return (
       Array.isArray(point.ownerSensorsWithData) ||
       Boolean(point.ownerSensorIds?.length) ||
@@ -182,14 +183,14 @@ export function isPanelSensorPickerReady(point) {
 /** Owner block: resolved (owner known or confirmed DIY without owner). */
 export function isPanelOwnerResolved(point) {
   if (point?.idbSensorType === "diy") return true;
-  if (normalizeOwnerKey(point)) return true;
+  if (hasSensorOwner(point)) return true;
   return point?._ownerResolved === true;
 }
 
 export function isPanelOwnerLoading(point) {
   const sid = String(point?.sensor_id || "");
   if (!sid || point?.idbSensorType === "diy") return false;
-  if (normalizeOwnerKey(point)) return false;
+  if (hasSensorOwner(point)) return false;
   return !isPanelOwnerResolved(point);
 }
 
@@ -371,7 +372,7 @@ function finalizeOwnerBundleNearAnchor(rows, anchorGeo, activeSensorId) {
  */
 export function buildSensorPickerRows(point, logSamples = null) {
   const currentId = String(point?.sensor_id || "");
-  const hasOwner = !!normalizeOwnerKey(point);
+  const hasOwner = hasSensorOwner(point);
   const types = hasOwner ? OWNER_PICKER_TYPES : DIY_PICKER_TYPES;
   const bundle = hasOwner ? point?.ownerSensorsWithData : null;
 
@@ -1841,7 +1842,7 @@ export function useSensors(localeComputed) {
       timestamp: basePoint.timestamp ?? null,
       ownerSensorsWithData: basePoint.ownerSensorsWithData ?? null,
       ownerSensorIds: basePoint.ownerSensorIds ?? null,
-      isBookmarked: isSensorBookmarked(basePoint.sensor_id),
+      isBookmarked: isPointBookmarked(basePoint),
       logs: Array.isArray(basePoint.logs)
         ? sanitizeSensorLogsPmSentinels(basePoint.logs)
         : basePoint.logs ?? null,
@@ -2714,6 +2715,8 @@ export function useSensors(localeComputed) {
       if (sensorPoint.value?.sensor_id) {
         setActiveMarker(resolveOwnerClusterMarkerId(sensorPoint.value.sensor_id));
       }
+
+      refreshAllMarkerBookmarkHighlights();
     } catch (error) {
       console.error("Error updating markers:", error);
     }

@@ -24,6 +24,18 @@
         <font-awesome-icon icon="fa-solid fa-caret-down" class="panel-trigger__caret" aria-hidden="true" />
       </button>
       <div v-else-if="isOwnerLoading" class="panel-skeleton panel-skeleton--trigger" aria-hidden="true" />
+      <div
+        v-else
+        class="panel-trigger panel-trigger--owner panel-trigger--placeholder"
+        aria-hidden="true"
+      >
+        <div class="panel-list__media panel-list__media--round" />
+        <div class="panel-list__text">
+          <b class="panel-list__title">{{ t("sensorpopup.infosensorowner") }}</b>
+          <span class="panel-list__meta">{{ ownerPlaceholderMeta }}</span>
+        </div>
+        <font-awesome-icon icon="fa-solid fa-caret-down" class="panel-trigger__caret" aria-hidden="true" />
+      </div>
       <div id="data-owner-popover" class="popover panel-popover panel-popover--end" popover>
         <div class="panel-list__item panel-list__item--static">
           <div class="panel-list__media panel-list__media--round" aria-hidden="true">
@@ -183,6 +195,7 @@ const { logsHealth, logsHealthMeta } = useLogsHealth();
 
 const ownerKey = computed(() => String(props.point?.owner || "").trim());
 const ownerAvatar = ref(null);
+const ownerPlaceholderMeta = formatSensorIdShort("00000000000000000000000000000000");
 
 const isSensorPickerReady = computed(() => isPanelSensorPickerReady(props.point));
 const isOwnerLoading = computed(() => isPanelOwnerLoading(props.point));
