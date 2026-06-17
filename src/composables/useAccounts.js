@@ -1,3 +1,15 @@
+/**
+ * Saved Robonomics accounts (login sessions).
+ *
+ * IndexedDB: `Accounts` → object store `Saved` (keyPath: `address`).
+ * Schema: src/config/default/idb-schemas.json
+ *
+ * Record: { phrase, address, type, devices, ts, persist? }
+ *   phrase — encrypted in IDB (plain in memory after load)
+ *
+ * Legacy (migrated on load, then DB deleted):
+ *   `Altruist` → `Accounts` object store
+ */
 import { ref } from "vue";
 import {
   IDBworkflow,
@@ -5,16 +17,49 @@ import {
   IDBdeleteByKey,
   notifyDBChange,
   hasIndexedDB,
+  migrateDB,
   encryptText,
   decryptText,
 } from "../utils/idb";
 import { idbschemas, settings } from "@config";
 import { fetchJson } from "@/utils/utils";
 
-const schema = idbschemas?.Altruist || {};
-const DB_NAME = schema.dbname;
-const STORE = Object.keys(schema.stores || { Accounts: {} })[0] || "Accounts";
+const schema = idbschemas?.Accounts || {};
+const DB_NAME = schema.dbname || "Accounts";
+const STORE = "Saved";
 const SESSION_ACCOUNTS_KEY = "altruist_session_accounts";
+
+/* =============================================================================
+ * LEGACY MIGRATION — remove this block when Altruist DB is gone for all users
+ * ============================================================================= */
+const LEGACY_ACCOUNTS_DB = "Altruist";
+const LEGACY_ACCOUNTS_STORE = "Accounts";
+let accountsStoreMigrationPromise = null;
+
+async function runAccountsLegacyMigrations() {
+  if (!hasIndexedDB()) return;
+
+  await migrateDB({
+    fromDB: LEGACY_ACCOUNTS_DB,
+    fromStore: LEGACY_ACCOUNTS_STORE,
+    toDB: DB_NAME,
+    toStore: STORE,
+    fromLegacy: true,
+    deleteSourceDB: true,
+    dedupeKey: "address",
+  });
+}
+
+function ensureAccountsStoreMigrated() {
+  if (!accountsStoreMigrationPromise) {
+    accountsStoreMigrationPromise = runAccountsLegacyMigrations().catch((error) => {
+      console.warn("Accounts IDB migration failed:", error);
+      accountsStoreMigrationPromise = null;
+    });
+  }
+  return accountsStoreMigrationPromise;
+}
+/* ============================================================================= */
 
 // In-memory cache for getUserSensors to prevent request storms.
 const USER_SENSORS_TTL_MS = 15 * 60 * 1000; // 15 minutes
@@ -152,6 +197,7 @@ export function useAccounts() {
     else accounts.value.push(item);
 
     if (persist && hasIndexedDB()) {
+      await ensureAccountsStoreMigrated();
       const encryptedPhrase = await encryptPhraseForStorage(phrase);
       const itemForStorage = { ...item, phrase: encryptedPhrase, persist: true };
       IDBworkflow(DB_NAME, STORE, "readwrite", (store) => {
@@ -182,6 +228,7 @@ export function useAccounts() {
     writeSessionAccounts(session);
 
     if (hasIndexedDB()) {
+      await ensureAccountsStoreMigrated();
       await Promise.all(list.map((addr) => IDBdeleteByKey(DB_NAME, STORE, addr)));
       notifyDBChange(DB_NAME, STORE);
     }
@@ -214,6 +261,9 @@ export function useAccounts() {
       accounts.value = [...sessionAccounts];
       return accounts.value;
     }
+
+    await ensureAccountsStoreMigrated();
+
     const data = await IDBgettable(DB_NAME, STORE);
     const persistentRaw = Array.isArray(data) ? data : [];
     const persistentAccounts = (await normalizeAccountsFromStorage(persistentRaw)).map((acc) => ({

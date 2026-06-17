@@ -227,6 +227,20 @@ async function refreshBookmarksList() {
   }
 }
 
+async function putBookmarkRecord(record) {
+  await new Promise((resolve, reject) => {
+    IDBworkflow(DB_NAME, STORE, "readwrite", (store) => {
+      const request = store.put(record);
+      request.addEventListener("error", (e) => reject(e));
+      request.addEventListener("success", () => resolve());
+    });
+  });
+}
+
+/* =============================================================================
+ * LEGACY MIGRATION — remove this block when all users migrated
+ * ============================================================================= */
+
 function geoFromIdbSensorEntry(entry, sensorId) {
   if (!entry?.data || typeof entry.data !== "object") return null;
   const sid = String(sensorId);
@@ -287,16 +301,6 @@ async function resolveLegacyBookmarkPoint(sensorId) {
 
   if (!hasValidCoordinates(geo)) return null;
   return { sensor_id: sid, geo, owner };
-}
-
-async function putBookmarkRecord(record) {
-  await new Promise((resolve, reject) => {
-    IDBworkflow(DB_NAME, STORE, "readwrite", (store) => {
-      const request = store.put(record);
-      request.addEventListener("error", (e) => reject(e));
-      request.addEventListener("success", () => resolve());
-    });
-  });
 }
 
 /** Upgrade legacy sensor_id bookmarks to owner+geo point keys when geo can be resolved. */
@@ -389,6 +393,14 @@ async function migrateBookmarkKeys() {
   }
 }
 
+async function runBookmarkLegacyMigrations() {
+  if (!DB_NAME || !STORE) return;
+  await migrateLegacyBookmarks();
+  await migrateBookmarkKeys();
+}
+
+/* ============================================================================= */
+
 async function upsertPointBookmark(point, name) {
   if (!point || !DB_NAME || !STORE) return;
 
@@ -451,8 +463,7 @@ export function useBookmarks() {
         store.delete("init");
       });
 
-      await migrateLegacyBookmarks();
-      await migrateBookmarkKeys();
+      await runBookmarkLegacyMigrations();
       await refreshBookmarksList();
     } catch (error) {
       console.error("Error in idbBookmarkGet:", error);

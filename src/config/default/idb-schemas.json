@@ -1,15 +1,14 @@
 {
-  "Altruist": {
-    "dbname": "Altruist",
+  "Accounts": {
+    "dbname": "Accounts",
     "dbversion": 1,
     "stores": {
-      "Accounts": { "keyPath": "address", "autoIncrement": false }
+      "Saved": { "keyPath": "address", "autoIncrement": false }
     }
   },
   "Sensors": {
     "dbname": "Sensors",
     "dbversion": 4,
-    "logsHealthStore": "logsHealth",
     "stores": {
       "sensorData": { "keyPath": "id", "autoIncrement": false },
       "bookmarks": { "keyPath": "id", "autoIncrement": true },

@@ -233,7 +233,7 @@ export async function decryptText(data) {
     Отправляет событие в BroadcastChannel, что в objectStore произошли изменения.
     Вызывай после любых операций изменения данных в IndexedDB, чтобы другие вкладки/компоненты могли отреагировать.
     Пример:
-        notifyDBChange('Altruist', 'Accounts')
+        notifyDBChange('Accounts', 'Saved')
 */
 export function notifyDBChange(dbname, dbtable) {
   const bc = new BroadcastChannel("idb_changed");
@@ -249,7 +249,7 @@ export function notifyDBChange(dbname, dbtable) {
     - callback: функция, вызываемая при изменении
     Возвращает функцию для отписки.
     Пример:
-        const stop = watchDBChange('Altruist', 'Accounts', loadAccounts);
+        const stop = watchDBChange('Accounts', 'Saved', loadAccounts);
         onUnmounted(stop);
 */
 export function watchDBChange(dbname, dbtable, callback) {
@@ -275,54 +275,158 @@ export function hasIndexedDB() {
 }
 
 /*
-    migrateDB()
-    Общий механизм миграции данных между базами данных.
-    @param {Object} migrationConfig - конфигурация миграции
-    @param {string} migrationConfig.fromDB - исходная база данных
-    @param {string} migrationConfig.fromStore - исходная таблица
-    @param {string} migrationConfig.toDB - целевая база данных
-    @param {string} migrationConfig.toStore - целевая таблица
-    @param {Function} migrationConfig.transform - функция преобразования данных (опционально)
-    @param {boolean} migrationConfig.clearSource - очищать исходную таблицу после миграции (по умолчанию true)
-    @returns {Promise<boolean>} true если миграция прошла успешно
+    IDBputRecord(dbname, dbtable, record)
+    Записывает одну запись в objectStore. Возвращает Promise.
 */
-export async function migrateDB(migrationConfig) {
-  const {
-    fromDB,
-    fromStore,
-    toDB,
-    toStore,
-    transform = (data) => data, // По умолчанию данные не изменяются
-    clearSource = true,
-  } = migrationConfig;
+export function IDBputRecord(dbname, dbtable, record) {
+  return new Promise((resolve, reject) => {
+    IDBworkflow(dbname, dbtable, "readwrite", (store) => {
+      const request = store.put(record);
+      request.addEventListener("error", (e) => reject(e));
+      request.addEventListener("success", () => resolve());
+    });
+  });
+}
 
-  try {
-    // Проверяем, существует ли исходная база данных
-    let sourceData = [];
-    try {
-      sourceData = await IDBgettable(fromDB, fromStore);
-      if (!sourceData || sourceData.length === 0) {
-        return true;
-      }
-    } catch (error) {
-      return true; // Не считаем это ошибкой
+/* =============================================================================
+ * IndexedDB migrations (legacy DBs / stores not in idb-schemas)
+ * ============================================================================= */
+
+/*
+    deleteIndexedDB(dbname)
+    Удаляет базу IndexedDB целиком.
+*/
+export function deleteIndexedDB(dbname) {
+  return new Promise((resolve) => {
+    const IDB = window.indexedDB || window.webkitIndexedDB;
+    if (!IDB || !dbname) {
+      resolve(false);
+      return;
+    }
+    const req = IDB.deleteDatabase(String(dbname));
+    req.onsuccess = () => resolve(true);
+    req.onerror = () => resolve(false);
+    req.onblocked = () => resolve(false);
+  });
+}
+
+/*
+    IDBgettableLegacy(dbname, storeName)
+    Читает objectStore из БД без схемы idbschemas (для одноразовой миграции).
+*/
+export function IDBgettableLegacy(dbname, storeName) {
+  return new Promise((resolve) => {
+    const IDB = window.indexedDB || window.webkitIndexedDB;
+    if (!IDB || !dbname || !storeName) {
+      resolve([]);
+      return;
     }
 
-    if (!sourceData || sourceData.length === 0) {
+    const req = IDB.open(String(dbname));
+    req.onerror = () => resolve([]);
+
+    req.onsuccess = (e) => {
+      const db = e.target.result;
+      if (!db.objectStoreNames.contains(storeName)) {
+        db.close();
+        resolve([]);
+        return;
+      }
+
+      const data = [];
+      const tx = db.transaction(storeName, "readonly");
+      const store = tx.objectStore(storeName);
+      const cursorReq = store.openCursor();
+
+      cursorReq.onerror = () => {
+        db.close();
+        resolve([]);
+      };
+
+      cursorReq.onsuccess = (ev) => {
+        const cursor = ev.target.result;
+        if (cursor) {
+          data.push(cursor.value);
+          cursor.continue();
+        } else {
+          db.close();
+          resolve(data);
+        }
+      };
+    };
+  });
+}
+
+/*
+    migrateDB(config)
+    Копирует записи между objectStore (в т.ч. из legacy-БД вне idb-schemas).
+
+    fromLegacy — читать источник через IDBgettableLegacy (БД нет в idb-schemas)
+    deleteSourceDB — удалить исходную БД после миграции (вместо clearSource)
+    dedupeKey — поле записи или (record) => key; пропускать дубликаты в целевом store
+    transform — (record) => record | null; null пропускает запись
+*/
+export async function migrateDB({
+  fromDB,
+  fromStore,
+  toDB,
+  toStore,
+  transform = (data) => data,
+  clearSource = false,
+  deleteSourceDB = false,
+  fromLegacy = false,
+  dedupeKey = null,
+} = {}) {
+  try {
+    let sourceData = [];
+    if (fromLegacy) {
+      sourceData = await IDBgettableLegacy(fromDB, fromStore);
+    } else {
+      try {
+        sourceData = await IDBgettable(fromDB, fromStore);
+      } catch {
+        sourceData = [];
+      }
+    }
+
+    if (!sourceData?.length) {
+      if (deleteSourceDB) await deleteIndexedDB(fromDB);
       return true;
     }
 
-    // Мигрируем данные
-    for (const record of sourceData) {
-      const transformedRecord = transform(record);
-
-      IDBworkflow(toDB, toStore, "readwrite", (store) => {
-        store.put(transformedRecord);
-      });
+    const existingKeys = new Set();
+    if (dedupeKey) {
+      try {
+        const existing = await IDBgettable(toDB, toStore);
+        for (const record of existing) {
+          const key =
+            typeof dedupeKey === "function" ? dedupeKey(record) : record?.[dedupeKey];
+          if (key != null && String(key).trim()) existingKeys.add(String(key).trim());
+        }
+      } catch {
+        // target store may not exist yet
+      }
     }
 
-    // Очищаем исходную таблицу если требуется
-    if (clearSource) {
+    let changed = false;
+
+    for (const record of sourceData) {
+      const transformed = transform(record);
+      if (!transformed) continue;
+
+      if (dedupeKey) {
+        const key =
+          typeof dedupeKey === "function" ? dedupeKey(transformed) : transformed?.[dedupeKey];
+        const normalized = key != null ? String(key).trim() : "";
+        if (normalized && existingKeys.has(normalized)) continue;
+        if (normalized) existingKeys.add(normalized);
+      }
+
+      await IDBputRecord(toDB, toStore, transformed);
+      changed = true;
+    }
+
+    if (clearSource && !fromLegacy) {
       try {
         await IDBcleartable(fromDB, fromStore);
       } catch (error) {
@@ -330,8 +434,13 @@ export async function migrateDB(migrationConfig) {
       }
     }
 
-    // Уведомляем об изменениях в целевой базе
-    notifyDBChange(toDB, toStore);
+    if (deleteSourceDB) {
+      await deleteIndexedDB(fromDB);
+    }
+
+    if (changed) {
+      notifyDBChange(toDB, toStore);
+    }
 
     return true;
   } catch (error) {

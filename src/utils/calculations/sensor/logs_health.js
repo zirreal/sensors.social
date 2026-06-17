@@ -698,13 +698,10 @@ function copyDayEntriesFrom(source, target) {
 
 const sensorsIdbSchema = idbschemas?.Sensors;
 const sensorsIdbDbName = sensorsIdbSchema?.dbname ?? null;
-const logsHealthStoreKey = sensorsIdbSchema?.logsHealthStore;
-const logsHealthStoreName =
-  typeof logsHealthStoreKey === "string" &&
-  logsHealthStoreKey.length > 0 &&
-  sensorsIdbSchema?.stores?.[logsHealthStoreKey]
-    ? logsHealthStoreKey
-    : null;
+const LOGS_HEALTH_STORE = "logsHealth";
+const logsHealthStoreName = sensorsIdbSchema?.stores?.[LOGS_HEALTH_STORE]
+  ? LOGS_HEALTH_STORE
+  : null;
 
 function defaultLogsHealthUi() {
   return Object.fromEntries(HEALTH_DAY_KEYS.map((key) => [key, { healthy: true }]));
@@ -900,7 +897,7 @@ function idbPutLogsHealth(record) {
     };
     const timer = globalThis.setTimeout(() => {
       fail(
-        "logsHealth IDB: транзакция не открылась (нет стора / IndexedDB). Проверьте dbversion и logsHealthStore в idb-schemas."
+        "logsHealth IDB: транзакция не открылась (нет стора / IndexedDB). Проверьте dbversion и stores.logsHealth в idb-schemas."
       );
     }, 5000);
 
@@ -945,7 +942,7 @@ async function getOrCheckLogsHealth(sensorId, logs, context) {
 
 export async function checkAndSaveLogsHealth(sensorId, logs = null, context = {}) {
   if (!sensorsIdbDbName || !logsHealthStoreName) {
-    console.warn("Sensors IDB: schema or logsHealthStore / stores entry missing in idb-schemas");
+    console.warn("Sensors IDB: schema or stores.logsHealth missing in idb-schemas");
     syncLogsHealthMeta(sensorId, null);
     return defaultLogsHealthUi();
   }
