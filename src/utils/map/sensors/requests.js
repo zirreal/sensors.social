@@ -88,15 +88,6 @@ export function hasSensorOwner(item) {
   return Boolean(String(item?.owner || "").trim());
 }
 
-export function logSamplesHaveCo2(samples) {
-  if (!Array.isArray(samples) || samples.length === 0) return false;
-  for (const item of samples) {
-    const n = Number(item?.data?.co2);
-    if (Number.isFinite(n)) return true;
-  }
-  return false;
-}
-
 export function parseBundleSensorEntry(entry) {
   if (entry == null) return null;
   if (typeof entry === "string" || typeof entry === "number") {
@@ -115,15 +106,12 @@ export function parseBundleSensorEntry(entry) {
   return null;
 }
 
-export function sensorTypeFromDeviceModel(deviceModel, logSamples = null) {
+export function sensorTypeFromDeviceModel(deviceModel) {
   const m = String(deviceModel || "").toLowerCase();
   if (m === "insight") return "insight";
   if (m === "urban") return "urban";
   if (m === "diy") return "diy";
   if (m === "altruist") return "altruist";
-  if (Array.isArray(logSamples) && logSamples.length > 0) {
-    return classifySensorTypeFromLogSamples(logSamples);
-  }
   return null;
 }
 
@@ -156,20 +144,9 @@ export function listBundleSensorIds(meta) {
   return listBundleSensorEntries(meta).map((e) => e.sensor_id);
 }
 
-/** Device role for map rep — use device_model first;  */
+/** Device role for map rep — device_model only (Insight vs Urban). */
 export function isInsightMapDevice(sensor) {
-  const dm = String(sensor?.device_model || "").toLowerCase();
-  if (dm === "insight") return true;
-  if (dm === "urban" || dm === "altruist") return false;
-  const co2 = Number(sensor?.data?.co2);
-  const noise = Number(
-    sensor?.data?.noisemax ?? sensor?.data?.noiseavg ?? sensor?.data?.noise
-  );
-  const hasCo2 = Number.isFinite(co2);
-  const hasNoise = Number.isFinite(noise);
-  if (hasCo2 && !hasNoise) return true;
-  if (hasNoise && !hasCo2) return false;
-  return false;
+  return String(sensor?.device_model || "").toLowerCase() === "insight";
 }
 
 /**
@@ -310,10 +287,208 @@ export function countLiveRealtimeMapMarkers(list, liveIds, opts = {}) {
 import {
   IDBworkflow,
   IDBgettable,
+  IDBgetByKey,
+  IDBputRecord,
   IDBdeleteByKey,
   IDBcleartable,
   notifyDBChange,
 } from "../../idb.js";
+
+const SENSORS_IDB_DB = "Sensors";
+const MAP_MARKERS_DATA_STORE = "mapMarkersData";
+
+/** In-memory slice of the latest maxdata payload (per unit) for sibling lookups. */
+const maxDataApiCache = new Map();
+
+function mapMarkersDataId(unit, isoDate) {
+  return `${String(unit || "").toLowerCase()}:${isoDate}`;
+}
+
+export function getCachedMaxDataValue(sensorId, unit) {
+  const entry = getCachedMaxDataEntry(sensorId, unit);
+  if (!entry) return null;
+  const n = Number(entry.value);
+  return Number.isFinite(n) ? n : null;
+}
+
+export function getCachedMaxDataEntry(sensorId, unit) {
+  const cache = maxDataApiCache.get(unit);
+  const entry = cache?.values?.[String(sensorId || "")];
+  return entry && typeof entry === "object" ? entry : null;
+}
+
+export function clearMaxDataApiCache() {
+  maxDataApiCache.clear();
+}
+
+/** Marker icon types persisted per rep sensor_id (dual / urban / insight / diy). */
+const markerIconMemCache = new Map();
+
+export const MARKER_ICON_TTL_MS = 5 * 60 * 60 * 1000;
+
+function markerIconMemKey(isoDate, sensorId) {
+  return `${isoDate}:${String(sensorId || "")}`;
+}
+
+export function markerIconsIdbKey(isoDate) {
+  return `icons:${isoDate}`;
+}
+
+function markerIconRank(iconType) {
+  if (iconType === "dual") return 3;
+  if (iconType === "insight" || iconType === "urban") return 2;
+  return 1;
+}
+
+function isIconEntryFresh(icon) {
+  if (!icon?.iconType) return false;
+  const updatedAt = Number(icon.updatedAt || 0);
+  if (!updatedAt) return false;
+  return Date.now() - updatedAt < MARKER_ICON_TTL_MS;
+}
+
+function isMarkerIconsRecordStale(record) {
+  if (!record?.icons || typeof record.icons !== "object") return true;
+  const keys = Object.keys(record.icons);
+  if (keys.length === 0) return true;
+  const recordUpdated = Number(record.lastUpdated || 0);
+  if (!recordUpdated || Date.now() - recordUpdated >= MARKER_ICON_TTL_MS) return true;
+  return keys.some((sid) => !isIconEntryFresh(record.icons[sid]));
+}
+
+export function peekMarkerIconCache(sensorId, isoDate, { respectTtl = false } = {}) {
+  if (!sensorId || !isoDate) return null;
+  const entry = markerIconMemCache.get(markerIconMemKey(isoDate, sensorId));
+  if (!entry?.iconType) return null;
+  if (respectTtl && !isIconEntryFresh(entry)) return null;
+  return entry;
+}
+
+export function clearMarkerIconMemCache() {
+  markerIconMemCache.clear();
+}
+
+async function readMarkerIconsRecordFromIdb(isoDate) {
+  try {
+    return await IDBgetByKey(SENSORS_IDB_DB, MAP_MARKERS_DATA_STORE, markerIconsIdbKey(isoDate));
+  } catch {
+    return null;
+  }
+}
+
+/** True when icons for this day should be re-resolved (missing or older than 5 h). */
+export async function isMarkerIconsDayStale(isoDate) {
+  if (!isoDate) return true;
+  const record = await readMarkerIconsRecordFromIdb(isoDate);
+  return isMarkerIconsRecordStale(record);
+}
+
+/** Load all marker icons for a day from IDB into memory (call after loadSensors / before markers). */
+export async function hydrateMarkerIconCacheForDate(isoDate) {
+  if (!isoDate) return;
+  const record = await readMarkerIconsRecordFromIdb(isoDate);
+  const icons = record?.icons;
+  if (!icons || typeof icons !== "object") return;
+  for (const [sensorId, icon] of Object.entries(icons)) {
+    if (!icon?.iconType) continue;
+    const key = markerIconMemKey(isoDate, sensorId);
+    const existing = markerIconMemCache.get(key);
+    if (!existing || markerIconRank(icon.iconType) >= markerIconRank(existing.iconType)) {
+      markerIconMemCache.set(key, icon);
+    }
+  }
+}
+
+/**
+ * Persist map marker icon for a rep sensor (stable across popup hydration / realtime).
+ * Never downgrades dual → single-device icon unless `force` (TTL refresh).
+ */
+export async function rememberMarkerIcon(sensorId, isoDate, icon, { force = false } = {}) {
+  const sid = String(sensorId || "");
+  const iconType = icon?.iconType;
+  if (!sid || !isoDate || !iconType) return;
+
+  const memKey = markerIconMemKey(isoDate, sid);
+  const existing = markerIconMemCache.get(memKey);
+  if (existing && markerIconRank(existing.iconType) > markerIconRank(iconType)) {
+    return;
+  }
+
+  const payload = {
+    iconType,
+    fullBleed: Boolean(icon.fullBleed),
+    updatedAt: Date.now(),
+  };
+  markerIconMemCache.set(memKey, payload);
+
+  try {
+    const idbKey = markerIconsIdbKey(isoDate);
+    const prev = (await readMarkerIconsRecordFromIdb(isoDate)) || {
+      id: idbKey,
+      isoDate,
+      icons: {},
+    };
+    const prevIcon = prev.icons?.[sid];
+    if (prevIcon && markerIconRank(prevIcon.iconType) > markerIconRank(iconType)) {
+      markerIconMemCache.set(memKey, { ...prevIcon, updatedAt: prevIcon.updatedAt || payload.updatedAt });
+      return;
+    }
+    await writeMapMarkersDataToIdb({
+      ...prev,
+      id: idbKey,
+      isoDate,
+      icons: { ...(prev.icons || {}), [sid]: payload },
+      lastUpdated: Date.now(),
+    });
+  } catch (error) {
+    console.warn("mapMarkersData icon write failed:", error);
+  }
+}
+
+function rememberMaxDataInMemory(unit, isoDate, start, end, values) {
+  maxDataApiCache.set(unit, { start, end, isoDate, values: values || {} });
+}
+
+function isMaxDataMemoryValid(cached, isoDate, dayStart) {
+  if (!cached?.values || cached.isoDate !== isoDate || cached.start !== dayStart) return false;
+  return true;
+}
+
+function applyMaxValuesToSensors(sensors, unit, maxValues) {
+  return sensors.map((sensor) => {
+    const entry = maxValues?.[sensor.sensor_id];
+    const value = entry ? (entry.value ?? null) : null;
+    return {
+      ...sensor,
+      maxdata: {
+        ...sensor.maxdata,
+        [unit]: value,
+      },
+    };
+  });
+}
+
+async function readMapMarkersDataFromIdb(unit, isoDate) {
+  try {
+    return await IDBgetByKey(SENSORS_IDB_DB, MAP_MARKERS_DATA_STORE, mapMarkersDataId(unit, isoDate));
+  } catch {
+    return null;
+  }
+}
+
+async function writeMapMarkersDataToIdb(record) {
+  try {
+    await IDBputRecord(SENSORS_IDB_DB, MAP_MARKERS_DATA_STORE, record);
+    notifyDBChange(SENSORS_IDB_DB, MAP_MARKERS_DATA_STORE);
+  } catch (error) {
+    console.warn("mapMarkersData IDB write failed:", error);
+  }
+}
+
+function isPastDayCompleteInIdb(record, dayBounds) {
+  if (!record?.values) return false;
+  return Number(record.start) <= dayBounds.start && Number(record.end) >= dayBounds.end;
+}
 
 /**
  * Получает максимальные значения с проверкой кэша и обновлением сенсоров
@@ -322,10 +497,10 @@ import {
  * @param {number} end - конечный timestamp
  * @param {string} unit - единица измерения (pm10, pm25, etc.)
  * @param {Array} sensors - массив сенсоров
+ * @param {string} [isoDate] - YYYY-MM-DD (для кэша «сегодня» end может расти)
  * @returns {Array} обновленный массив сенсоров с maxdata
  */
-export async function getMaxData(start, end, unit, sensors) {
-  // Fetch unless every sensor already has maxdata for this unit.
+export async function getMaxData(start, end, unit, sensors, isoDate = dayISO()) {
   const allHaveUnit =
     sensors.length > 0 &&
     sensors.every((sensor) => sensor?.maxdata && sensor.maxdata[unit] !== undefined);
@@ -334,30 +509,68 @@ export async function getMaxData(start, end, unit, sensors) {
     return [...sensors];
   }
 
-  // Делаем API запрос
-  const maxValues = await REMOTE_PROVIDER.maxValuesForPeriod(start, end, unit);
+  const dayBounds = dayBoundsUnix(isoDate);
+  const dayStart = dayBounds.start;
+  const isToday = isoDate === dayISO();
+  const requestedEnd = isToday ? Math.floor(Number(end) || Date.now() / 1000) : dayBounds.end;
 
-  // Обновляем maxdata для существующих сенсоров
-  const updatedSensors = sensors.map((sensor) => {
-    const sensorId = sensor.sensor_id;
-    const hasMaxData = maxValues[sensorId];
-
-    if (hasMaxData) {
-      // Новая структура API: {model, geo, timestamp, value}
-      const currentUnitValue = maxValues[sensorId].value;
-
-      return {
-        ...sensor,
-        maxdata: {
-          ...sensor.maxdata, // Сохраняем существующие данные
-          [unit]: currentUnitValue || null,
-        },
-      };
+  const mem = maxDataApiCache.get(unit);
+  if (isMaxDataMemoryValid(mem, isoDate, dayStart)) {
+    if (!isToday || Number(mem.end) >= requestedEnd) {
+      return applyMaxValuesToSensors(sensors, unit, mem.values);
     }
-    return sensor;
-  });
+  }
 
-  return updatedSensors;
+  const idbKey = mapMarkersDataId(unit, isoDate);
+  const idbRecord = await readMapMarkersDataFromIdb(unit, isoDate);
+
+  let fetchStart = dayStart;
+  let fetchEnd = requestedEnd;
+  let needFetch = false;
+
+  if (!idbRecord?.values) {
+    needFetch = true;
+  } else if (!isToday) {
+    if (isPastDayCompleteInIdb(idbRecord, dayBounds)) {
+      rememberMaxDataInMemory(unit, isoDate, idbRecord.start, idbRecord.end, idbRecord.values);
+      return applyMaxValuesToSensors(sensors, unit, idbRecord.values);
+    }
+    needFetch = true;
+    fetchEnd = dayBounds.end;
+  } else if (!mem) {
+    // Page reload / first call this session — serve IDB even if end is slightly behind now.
+    rememberMaxDataInMemory(unit, isoDate, idbRecord.start, idbRecord.end, idbRecord.values);
+    return applyMaxValuesToSensors(sensors, unit, idbRecord.values);
+  } else if (Number(idbRecord.end) >= requestedEnd) {
+    rememberMaxDataInMemory(unit, isoDate, idbRecord.start, idbRecord.end, idbRecord.values);
+    return applyMaxValuesToSensors(sensors, unit, idbRecord.values);
+  } else {
+    needFetch = true;
+    fetchStart = Number(idbRecord.start) || dayStart;
+    fetchEnd = requestedEnd;
+  }
+
+  if (!needFetch) {
+    return [...sensors];
+  }
+
+  const maxValues = await REMOTE_PROVIDER.maxValuesForPeriod(fetchStart, fetchEnd, unit);
+  const values = maxValues || {};
+
+  const record = {
+    id: idbKey,
+    unit: String(unit).toLowerCase(),
+    isoDate,
+    start: fetchStart,
+    end: fetchEnd,
+    values,
+    lastUpdated: Date.now(),
+  };
+
+  await writeMapMarkersDataToIdb(record);
+  rememberMaxDataInMemory(unit, isoDate, fetchStart, fetchEnd, values);
+
+  return applyMaxValuesToSensors(sensors, unit, values);
 }
 
 /**
@@ -482,25 +695,6 @@ export async function getSensorOwner(sensorId) {
   }
 }
 
-/**
- * Insight vs urban vs altruist from API log rows `{ data: { co2?, noiseavg?, noisemax? } }`.
- * @returns {null|string} `null` if samples is empty; otherwise a type string.
- */
-export function classifySensorTypeFromLogSamples(samples) {
-  if (!Array.isArray(samples) || samples.length === 0) return null;
-  let hasCo2 = false;
-  let hasNoise = false;
-  for (const item of samples) {
-    const d = item?.data || null;
-    if (d && d.co2 != null) hasCo2 = true;
-    if (d && (d.noiseavg != null || d.noisemax != null)) hasNoise = true;
-    if (hasCo2 && hasNoise) break;
-  }
-  if (hasCo2 && !hasNoise) return "insight";
-  if (!hasCo2 && hasNoise) return "urban";
-  return "altruist";
-}
-
 function geoFromLogPoints(points) {
   if (!Array.isArray(points) || points.length === 0) return null;
   const geo = points[points.length - 1]?.geo;
@@ -522,52 +716,7 @@ export function getCachedSensorMeta(sensorId) {
 
 export function clearSensorMetaCache() {
   latestSensorMetaById.clear();
-}
-
-/**
- * Max CO₂ for a map marker from v2 bundle meta (own logs + nearby Insight siblings).
- */
-export function computeMaxCo2FromMeta(meta, sensorId, sensorGeo, maxKm = OWNER_GEO_CLUSTER_KM) {
-  const data = meta?.data && typeof meta.data === "object" ? meta.data : null;
-  if (!data) return null;
-
-  const baseLat = Number(sensorGeo?.lat);
-  const baseLng = Number(sensorGeo?.lng);
-  const hasBaseGeo = Number.isFinite(baseLat) && Number.isFinite(baseLng);
-
-  const considerPoints = (points, requireNearby) => {
-    if (!Array.isArray(points)) return null;
-    let max = null;
-    for (const item of points) {
-      const n = Number(item?.data?.co2);
-      if (!Number.isFinite(n)) continue;
-      if (requireNearby && hasBaseGeo) {
-        const geo = item?.geo;
-        if (!geo || haversineKm({ lat: baseLat, lng: baseLng }, geo) > maxKm) {
-          continue;
-        }
-      }
-      if (max === null || n > max) max = n;
-    }
-    return max;
-  };
-
-  const sid = String(sensorId || "");
-  let max = considerPoints(data[sid], false);
-
-  for (const { sensor_id } of listBundleSensorEntries(meta)) {
-    const id = String(sensor_id);
-    if (id === sid) continue;
-    if (!hasBaseGeo) continue;
-    const siblingPoints = data[id];
-    if (!logSamplesHaveCo2(siblingPoints)) continue;
-    const siblingMax = considerPoints(siblingPoints, true);
-    if (siblingMax !== null && (max === null || siblingMax > max)) {
-      max = siblingMax;
-    }
-  }
-
-  return max;
+  clearMaxDataApiCache();
 }
 
 function ownerBySensorIdFromList(sensorsList) {
@@ -675,7 +824,7 @@ export function getOwnerSensorsWithData(sensorId, anchorGeoOverride = null, sens
       return {
         id,
         hasData: hasData && hasValidCoordinates(geo),
-        type: hasData && hasValidCoordinates(geo) ? sensorTypeFromDeviceModel(device_model, points) : null,
+        type: hasData && hasValidCoordinates(geo) ? sensorTypeFromDeviceModel(device_model) : null,
         geo: hasValidCoordinates(geo) ? geo : null,
         device_model: device_model || null,
       };

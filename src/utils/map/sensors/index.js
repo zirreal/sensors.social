@@ -50,11 +50,15 @@ function upsertMarker(point, colors, sensor_id = null) {
     // Update marker data first
     existingMarker.options.data = point;
 
-    // Обновляем иконку
+    // Обновляем иконку только когда она реально изменилась.
     // Important: while a cluster is spiderfied, avoid calling `setIcon()` on child markers.
     // Markercluster treats icon changes as a reason to recalculate clusters, which can
     // collapse the spiderfy "web" after a short delay.
-    if (!spiderfyOpen) {
+    const prevData = existingMarker.options.data;
+    const iconUnchanged =
+      prevData?.iconLocal === point.iconLocal &&
+      Boolean(prevData?.markerIconFullBleed) === Boolean(point.markerIconFullBleed);
+    if (!spiderfyOpen && !iconUnchanged) {
       existingMarker.setIcon(
         icons.createIconPoint({
           image: point.iconLocal,

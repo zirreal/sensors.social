@@ -87,7 +87,7 @@ const activeRow = computed(() => {
 
   const sensorId = String(props.point?.sensor_id || "");
   return {
-    type: resolveSensorType(props.point, props.log),
+    type: resolveSensorType(props.point),
     sensorId: sensorId || null,
     state: sensorId ? "active" : "missing",
   };
