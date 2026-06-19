@@ -100,7 +100,8 @@ class Provider {
               : measurement[key];
           }
           const [lat, lng] = data.geo.split(",");
-          const donated_by = data.owner || data.donated_by || undefined;
+          const owner = data.owner || undefined;
+          const donated_by = data.donated_by || undefined;
           const device_model = data.device_model || undefined;
           const point = {
             sensor_id,
@@ -108,7 +109,7 @@ class Provider {
             model: data.model,
             geo: { lat, lng },
             data: measurementLowerCase,
-            owner: donated_by,
+            owner,
             donated_by,
             device_model,
             timestamp,

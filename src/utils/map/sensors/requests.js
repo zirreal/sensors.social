@@ -81,10 +81,10 @@ export function haversineKm(geoA, geoB) {
 }
 
 export function normalizeOwnerKey(item) {
-  return String(item?.owner || item?.donated_by || "").trim();
+  return String(item?.owner || "").trim();
 }
 
-/** True when sensor has an explicit `owner` field (ignores `donated_by`; used for DIY). */
+/** True when sensor has an explicit `owner` field (not `donated_by`; used for DIY). */
 export function hasSensorOwner(item) {
   return Boolean(String(item?.owner || "").trim());
 }
@@ -386,7 +386,7 @@ export async function isMarkerIconsDayStale(isoDate) {
 
 /** Load all marker icons for a day from IDB into memory (call after loadSensors / before markers). */
 export async function hydrateMarkerIconCacheForDate(isoDate) {
-  if (!isoDate) return;
+  if (!isoDate || !rosemanMarkerIconsEnabledForDate(isoDate)) return;
   const record = await readMarkerIconsRecordFromIdb(isoDate);
   const icons = record?.icons;
   if (!icons || typeof icons !== "object") return;
@@ -777,12 +777,100 @@ function filterSensorsByConfig(sensors) {
   }
 }
 
+// =============================================================================
+// TEMPORARY Roseman owner workaround — remove when a dedicated Roseman owner API
+// ships. The new markers endpoint (`api/v2/sensor/markers/…`) omits `owner` for
+// historical days before ~2026-06-08.
+//
+// On-demand only (popup / getSensorOwner / preloadSensorMeta) — never per-marker
+// on map load. Fallback chain:
+//   1) v2 sensor payload for today (owner often only in recent aggregates)
+//   2) v2 sensor payload for the requested day
+//   3) legacy v1 `api/sensor/{id}/{msStart}/{msEnd}` — 1h window (old sensors.social)
+//
+// Markers before ROSEMAN_MARKER_ICONS_FROM_ISO lack reliable device/owner meta — hide
+// device-type icons on the map until that day (colored circles only).
+// =============================================================================
+
+/** TEMPORARY — first day markers API includes reliable device icon metadata. */
+export const ROSEMAN_MARKER_ICONS_FROM_ISO = "2026-06-08";
+
+export function rosemanMarkerIconsEnabledForDate(isoDate) {
+  const d = String(isoDate || dayISO()).trim();
+  return d >= ROSEMAN_MARKER_ICONS_FROM_ISO;
+}
+
+const rosemanOwnerWorkaroundCache = new Map();
+const ROSEMAN_OWNER_WORKAROUND_TTL_MS = 15 * 60 * 1000;
+
+function cacheRosemanOwnerWorkaroundMeta(sensorId, sensorMeta, owner) {
+  if (!sensorMeta || typeof sensorMeta !== "object") return;
+  const sid = String(sensorId || "").trim();
+  if (!sid) return;
+  cacheSensorMetaForBundle(sid, owner ? { ...sensorMeta, owner } : sensorMeta);
+}
+
 /**
- * Получает owner для конкретного сенсора через короткий запрос
- * @param {string} sensorId - ID сенсора
- * @returns {string|null} owner сенсора или null
+ * TEMPORARY — see block above. Not the final Roseman owner lookup.
  */
-export async function getSensorOwner(sensorId) {
+async function resolveRosemanOwnerWorkaround(sensorId, startTimestamp, endTimestamp) {
+  const sid = String(sensorId || "").trim();
+  if (!sid) return null;
+
+  const cached = rosemanOwnerWorkaroundCache.get(sid);
+  if (cached && Date.now() - cached.ts < ROSEMAN_OWNER_WORKAROUND_TTL_MS) {
+    return cached.owner;
+  }
+
+  let owner = null;
+  const { start: todayStart, end: todayEnd } = sensorFetchBoundsForDate(dayISO());
+
+  try {
+    const todayPayload = await fetchSensorV2Payload(sid, todayStart, todayEnd);
+    owner = normalizeOwnerKey(todayPayload?.sensor);
+    if (owner) cacheRosemanOwnerWorkaroundMeta(sid, todayPayload.sensor, owner);
+  } catch {
+    // ignore
+  }
+
+  if (!owner && (startTimestamp !== todayStart || endTimestamp !== todayEnd)) {
+    try {
+      const periodPayload = await fetchSensorV2Payload(sid, startTimestamp, endTimestamp);
+      owner = normalizeOwnerKey(periodPayload?.sensor);
+      if (owner) cacheRosemanOwnerWorkaroundMeta(sid, periodPayload.sensor, owner);
+    } catch {
+      // ignore
+    }
+  }
+
+  if (!owner) {
+    try {
+      const endMs = Date.now();
+      const startMs = endMs - 3600000;
+      const result = await fetchJson(
+        `${settings.REMOTE_PROVIDER}api/sensor/${sid}/${startMs}/${endMs}`,
+        { cache: "no-store" }
+      );
+      owner = normalizeOwnerKey(result?.sensor);
+      if (owner && result?.sensor) {
+        cacheRosemanOwnerWorkaroundMeta(sid, result.sensor, owner);
+      }
+    } catch {
+      // ignore
+    }
+  }
+
+  rosemanOwnerWorkaroundCache.set(sid, { owner: owner || null, ts: Date.now() });
+  return owner || null;
+}
+
+/**
+ * Получает owner для конкретного сенсора.
+ * TEMPORARY: on-demand resolveRosemanOwnerWorkaround until Roseman owner API.
+ * @param {string} [isoDate] - просматриваемый день (Daily Recap); для дат до 2026-06-08
+ *   workaround также пробует v2 за сегодня.
+ */
+export async function getSensorOwner(sensorId, isoDate = null) {
   if (!sensorId) return null;
 
   try {
@@ -796,14 +884,9 @@ export async function getSensorOwner(sensorId) {
       if (owner) return owner;
     }
 
-    const { start, end } = sensorFetchBoundsForDate(dayISO());
-    const payload = await fetchSensorV2Payload(sid, start, end);
-    if (payload?.sensor?.owner) {
-      cacheSensorMetaForBundle(sid, payload.sensor);
-      return normalizeOwnerKey(payload.sensor);
-    }
-
-    return null;
+    const viewedDay = isoDate || dayISO();
+    const { start, end } = sensorFetchBoundsForDate(viewedDay);
+    return (await resolveRosemanOwnerWorkaround(sid, start, end)) || null;
   } catch (error) {
     console.warn("Failed to load sensor owner:", error);
     return null;
@@ -914,7 +997,28 @@ export function filterOwnerBundleNearAnchor(items, anchorGeo, activeSensorId, ma
   return withGeo.filter((o) => haversineKm(anchorGeo, o.geo) <= maxKm);
 }
 
-export function getOwnerSensorsWithData(sensorId, anchorGeoOverride = null, sensorsList = null) {
+/**
+ * All device ids for an owner present on the map list (fallback when getUserSensors API is empty).
+ */
+export function collectOwnerDeviceIds(ownerKey, sensorsList) {
+  const owner = String(ownerKey || "").trim();
+  if (!owner) return [];
+  return [
+    ...new Set(
+      (Array.isArray(sensorsList) ? sensorsList : [])
+        .filter((s) => normalizeOwnerKey(s) === owner)
+        .map((s) => String(s?.sensor_id || ""))
+        .filter(Boolean)
+    ),
+  ];
+}
+
+export function getOwnerSensorsWithData(
+  sensorId,
+  anchorGeoOverride = null,
+  sensorsList = null,
+  clusterBundle = true
+) {
   if (!sensorId) return null;
   const meta = getCachedSensorMeta(sensorId);
   // Meta may not be loaded yet (async preload). Return null so callers can
@@ -950,7 +1054,9 @@ export function getOwnerSensorsWithData(sensorId, anchorGeoOverride = null, sens
       return true;
     });
 
-  const filtered = filterOwnerBundleNearAnchor(mapped, anchorGeo, sid);
+  const filtered = clusterBundle
+    ? filterOwnerBundleNearAnchor(mapped, anchorGeo, sid)
+    : mapped.filter((o) => o?.geo && hasValidCoordinates(o.geo));
   return filtered.length > 0 ? filtered : null;
 }
 
@@ -963,8 +1069,17 @@ export async function preloadSensorMeta(sensorId, startTimestamp, endTimestamp, 
   try {
     const payload = await fetchSensorV2Payload(sensorId, startTimestamp, endTimestamp, signal);
     if (payload?.sensor && typeof payload.sensor === "object") {
-      cacheSensorMetaForBundle(sensorId, payload.sensor);
-      return payload.sensor;
+      let meta = payload.sensor;
+      if (!normalizeOwnerKey(meta)) {
+        const owner = await resolveRosemanOwnerWorkaround(
+          sensorId,
+          startTimestamp,
+          endTimestamp
+        );
+        if (owner) meta = { ...meta, owner };
+      }
+      cacheSensorMetaForBundle(sensorId, meta);
+      return meta;
     }
     return null;
   } catch (error) {

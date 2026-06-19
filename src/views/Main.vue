@@ -52,6 +52,7 @@ import {
   haversineKm,
   normalizeOwnerKey,
   pickOwnerClusterRepresentative,
+  collectOwnerDeviceIds,
 } from "../utils/map/sensors/requests";
 import { hasValidCoordinates } from "../utils/utils";
 import { useSensors } from "../composables/useSensors";
@@ -97,6 +98,66 @@ const { isMessage, messageData, messageGeo, closeMessage, messages, setActiveMes
   messagesUI;
 
 const sensorsList = () => (Array.isArray(sensors.value) ? sensors.value : []);
+
+/** Shell device for `?owner=` without `sensor=` — does not affect picker bundle (full list). */
+const pickOwnerShellSensorId = async (owner, lat, lng) => {
+  const o = String(owner || "").trim();
+  if (!o) return null;
+
+  let ids = (await accountStore.getUserSensors(o)).map((id) => String(id));
+  const list = sensorsList();
+  if (!ids.length) {
+    ids = collectOwnerDeviceIds(o, list);
+  }
+  if (!ids.length) return null;
+
+  const ownerSensors = list.filter((s) => ids.includes(String(s?.sensor_id || "")));
+  const withGeo = ownerSensors.filter((s) => hasValidCoordinates(s?.geo));
+
+  const latN = Number(lat);
+  const lngN = Number(lng);
+  const hasAnchor = Number.isFinite(latN) && Number.isFinite(lngN);
+  if (!hasAnchor) {
+    const pool = withGeo.length > 0 ? withGeo : ownerSensors;
+    const rep = pickOwnerClusterRepresentative(pool) || pool[0];
+    return rep?.sensor_id || ids[0] || null;
+  }
+
+  const anchor = { lat: latN, lng: lngN };
+  const nearby = withGeo.filter((s) => haversineKm(anchor, s.geo) <= OWNER_GEO_CLUSTER_KM);
+  const pool = nearby.length > 0 ? nearby : withGeo.length > 0 ? withGeo : ownerSensors;
+  const rep = pickOwnerClusterRepresentative(pool) || pool[0];
+  return rep?.sensor_id || ids[0] || null;
+};
+
+const openOwnerOnlyPopup = async (query) => {
+  const owner = String(query.owner || "").trim();
+  if (!owner) return;
+
+  const openPoint = sensorPoint.value;
+  if (openPoint?.sensor_id && String(openPoint.owner || "").trim() === owner) {
+    return;
+  }
+
+  const shellId = await pickOwnerShellSensorId(owner, query.lat, query.lng);
+  if (!shellId) return;
+
+  const fullSensorData = sensorsList().find((s) => s.sensor_id === shellId);
+  const latN = Number(query.lat);
+  const lngN = Number(query.lng);
+  const geoFromUrl =
+    Number.isFinite(latN) && Number.isFinite(lngN) ? { lat: latN, lng: lngN } : null;
+
+  updateSensorPopup(
+    formatPointForSensor(
+      fullSensorData || {
+        sensor_id: shellId,
+        geo: geoFromUrl || fullSensorData?.geo || { lat: 0, lng: 0 },
+        owner,
+      }
+    )
+  );
+};
 
 const handleSensorClose = () => {
   handlerCloseSensor();
@@ -145,7 +206,6 @@ const handleMessageClick = (data) => {
 
 /* + Realtime watch */
 let unwatchRealtime = null;
-const realtimeOwnerDeepLinkHandled = ref({ key: null });
 
 // Callback для обработки realtime данных
 const onRealtimePoint = async (point) => {
@@ -324,6 +384,7 @@ watch(
 
     // Определяем, что изменилось
     const sensorChanged = newQuery.sensor !== oldQuery?.sensor;
+    const ownerChanged = newQuery.owner !== oldQuery?.owner;
     const messageChanged = newQuery.message !== oldQuery?.message;
     const providerChanged = newQuery.provider !== oldQuery?.provider;
     const dateChanged = newQuery.date !== oldQuery?.date;
@@ -385,33 +446,6 @@ watch(
       }
 
       loadSensors().then(async () => {
-        const pickDefaultOwnerSensorId = async (owner, lat, lng) => {
-          const o = String(owner || "").trim();
-          if (!o) return null;
-
-          const ids = (await accountStore.getUserSensors(o)).map((id) => String(id));
-          if (!ids.length) return null;
-
-          const list = sensorsList();
-          const ownerSensors = list.filter((s) => ids.includes(String(s?.sensor_id || "")));
-
-          const latN = Number(lat);
-          const lngN = Number(lng);
-          const hasAnchor = Number.isFinite(latN) && Number.isFinite(lngN);
-          if (!hasAnchor) {
-            const rep = pickOwnerClusterRepresentative(ownerSensors) || ownerSensors[0];
-            return rep?.sensor_id || ids[0] || null;
-          }
-
-          const anchor = { lat: latN, lng: lngN };
-          const nearby = ownerSensors.filter(
-            (s) => hasValidCoordinates(s?.geo) && haversineKm(anchor, s.geo) <= OWNER_GEO_CLUSTER_KM
-          );
-          const pool = nearby.length > 0 ? nearby : ownerSensors;
-          const rep = pickOwnerClusterRepresentative(pool) || pool[0];
-          return rep?.sensor_id || ids[0] || null;
-        };
-
         if (mapState.currentProvider.value === "remote") {
           await updateSensorMaxData();
         } else {
@@ -427,7 +461,7 @@ watch(
         // После загрузки сенсоров обновляем попап: deep link `sensor=` или открытый попап (owner без sensor в URL)
         const ownerDefaultId =
           !route.query.sensor && route.query.owner
-            ? await pickDefaultOwnerSensorId(route.query.owner, route.query.lat, route.query.lng)
+            ? await pickOwnerShellSensorId(route.query.owner, route.query.lat, route.query.lng)
             : null;
 
         const liveSensorId =
@@ -468,62 +502,14 @@ watch(
       updateSensorPopup(point);
     }
 
-    // Realtime deep link: owner=... without sensor=... (shared links only, not marker clicks).
+    // Deep link: `?owner=` without `sensor=` — popup with full owner device list.
     if (
-      mapState.currentProvider.value === "realtime" &&
       newQuery.owner &&
       !newQuery.sensor &&
-      newQuery.lat != null &&
-      newQuery.lng != null
+      !providerChanged &&
+      (ownerChanged || sensorChanged)
     ) {
-      const owner = String(newQuery.owner).trim();
-      const latN = Number(newQuery.lat);
-      const lngN = Number(newQuery.lng);
-      const hasAnchor = Number.isFinite(latN) && Number.isFinite(lngN);
-      if (!owner || !hasAnchor) return;
-
-      const openPoint = sensorPoint.value;
-      if (openPoint?.sensor_id && String(openPoint.owner || "").trim() === owner) {
-        return;
-      }
-
-      // One-shot per (owner + day + type + provider) to avoid loops on every realtime tick.
-      const k = `${owner}-${newQuery.date || ""}-${newQuery.type || ""}-${newQuery.provider || ""}`;
-      if (realtimeOwnerDeepLinkHandled.value.key === k) return;
-
-      const ids = (await accountStore.getUserSensors(owner)).map((id) => String(id));
-      if (!ids.length) return;
-
-      const ownerSensors = sensorsList().filter((s) => ids.includes(String(s?.sensor_id || "")));
-      const anchor = { lat: latN, lng: lngN };
-
-      const nearby = ownerSensors.filter(
-        (s) => hasValidCoordinates(s?.geo) && haversineKm(anchor, s.geo) <= OWNER_GEO_CLUSTER_KM
-      );
-      const pool = nearby.length > 0 ? nearby : ownerSensors.filter((s) => hasValidCoordinates(s?.geo));
-      const best = pickOwnerClusterRepresentative(pool) || pool[0];
-      const fallbackId = ids[0] || null;
-      const sensorId = best?.sensor_id || fallbackId;
-      if (!sensorId) return;
-
-      realtimeOwnerDeepLinkHandled.value = { key: k };
-      mapState.setMapSettings(route, router, {
-        sensor: sensorId,
-        // keep owner in URL
-        owner,
-        lat: best?.geo?.lat ?? latN,
-        lng: best?.geo?.lng ?? lngN,
-        zoom: newQuery.zoom ?? 18,
-      });
-
-      updateSensorPopup(
-        best || {
-          sensor_id: sensorId,
-          geo: { lat: latN, lng: lngN },
-          owner,
-        },
-        { fromMapClick: true }
-      );
+      await openOwnerOnlyPopup(newQuery);
     }
 
     // Обновляем попап сообщения при изменении message или при первом заходе с сообщением

@@ -19,7 +19,7 @@
 
     <div ref="popoverRef" id="sensor-picker-popover" class="popover panel-popover" popover>
       <ul class="panel-list" role="listbox">
-        <li v-for="row in rows" :key="row.type">
+        <li v-for="row in rows" :key="row.sensorId || row.type">
           <button
             type="button"
             class="panel-list__item"
