@@ -506,8 +506,6 @@ watch(
             fullSensorData || {
               sensor_id: liveSensorId,
               geo: { lat: parseFloat(route.query.lat), lng: parseFloat(route.query.lng) },
-              // On hard refresh in realtime, sensors list may be empty until pubsub delivers points.
-              // Keep owner from URL so popup header and owner-select can render immediately.
               owner: route.query.owner ? String(route.query.owner) : null,
               address: existingAddress || null,
             }

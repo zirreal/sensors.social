@@ -3,8 +3,31 @@ import { settings } from "@config";
 import { useLogGeoAddresses } from "@/composables/useLogGeoAddresses";
 import { formatSensorIdShort, resolveSensorType, sensorTypeTitle } from "@/composables/useSensors";
 import measurements from "../measurements";
+import { MEASUREMENT_GROUPS, MEASUREMENT_GROUP_LOOKUP } from "../measurements/groups";
+import en from "../translate/en.js";
+import ru from "../translate/ru.js";
 
 export const SENSOR_PAGE_META_KEY = Symbol("sensorPageMeta");
+
+const UI_MESSAGES = { en, ru };
+
+function measurementTypeLabel(unitKey, locale) {
+  const key = String(unitKey || "").toLowerCase();
+  const groupKey = MEASUREMENT_GROUP_LOOKUP[key];
+  if (groupKey) {
+    const labelKey = MEASUREMENT_GROUPS[groupKey].labelKey;
+    const dict = UI_MESSAGES[locale] || UI_MESSAGES.en;
+    return dict[labelKey] || labelKey;
+  }
+
+  const unitInfo = measurements[key];
+  return (
+    unitInfo?.nameshort?.[locale] ||
+    unitInfo?.name?.[locale] ||
+    unitInfo?.label ||
+    key.toUpperCase()
+  );
+}
 
 const siteBrandName = () => settings?.SITE_NAME || "sensors.social";
 
@@ -62,12 +85,7 @@ export function useSensorPageMeta(
     const address = logGeoAddresses.headerAddress.value || "sensor location";
 
     const unitKey = String(query.type || mapState.currentUnit.value || "pm25").toLowerCase();
-    const unitInfo = measurements[unitKey];
-    const typeName =
-      unitInfo?.nameshort?.[locale] ||
-      unitInfo?.name?.[locale] ||
-      unitInfo?.label ||
-      unitKey.toUpperCase();
+    const typeName = measurementTypeLabel(unitKey, locale);
 
     const provider = query.provider || mapState.currentProvider.value || "remote";
     if (provider === "realtime") {

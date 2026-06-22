@@ -576,6 +576,65 @@ export function buildSensorPickerRows(point, logSamples = null) {
   return rows;
 }
 
+function unitValueFromMeasurementBag(bag, unit) {
+  if (!bag || unit == null) return null;
+  const u = String(unit).toLowerCase();
+  let raw = bag[u];
+  if (raw === undefined) {
+    for (const [k, v] of Object.entries(bag)) {
+      if (String(k).toLowerCase() === u) {
+        raw = v;
+        break;
+      }
+    }
+  }
+  if (raw === null || raw === undefined) return null;
+  const num = Number(raw);
+  if (!Number.isFinite(num)) return null;
+  if (PM_LOG_KEYS.includes(u) && num === -1) return null;
+  return num;
+}
+
+/** Picker order: bundle → markers API siblings → v2 meta. */
+function bundleSensorIdsInPickerOrder(point, sensorsList) {
+  const seen = new Set();
+  const ids = [];
+  const push = (raw) => {
+    const sid = String(raw || "").trim();
+    if (!sid || seen.has(sid)) return;
+    seen.add(sid);
+    ids.push(sid);
+  };
+
+  for (const e of point?.ownerSensorsWithData || []) push(e.id || e.sensor_id);
+  for (const entry of markerSensorsEntries(point, sensorsList)) {
+    push(parseBundleSensorEntry(entry)?.sensor_id);
+  }
+  const repId = String(point?.sensor_id || "");
+  const meta = repId ? getCachedSensorMeta(repId) : null;
+  if (meta) {
+    for (const entry of listBundleSensorEntries(meta)) push(entry.sensor_id);
+  }
+  return ids.length ? ids : repId ? [repId] : [];
+}
+
+/** First bundle device that has readings for the active map unit. */
+function pickSensorIdForMapUnit(point, sensorsList, unit, provider) {
+  const defaultId = String(point?.sensor_id || "");
+  const u = String(unit || "").toLowerCase();
+  if (!defaultId || !u) return defaultId;
+
+  const list = Array.isArray(sensorsList) ? sensorsList : [];
+  const isRemote = provider === "remote";
+  for (const sid of bundleSensorIdsInPickerOrder(point, sensorsList)) {
+    const row = list.find((s) => String(s?.sensor_id || "") === sid);
+    const bag = isRemote ? row?.maxdata : row?.data;
+    if (unitValueFromMeasurementBag(bag, u) !== null) return sid;
+    if (isRemote && getCachedMaxDataValue(sid, u) !== null) return sid;
+  }
+  return defaultId;
+}
+
 function mergePointWithIdbMeta(point, meta) {
   if (!point || !meta) return point;
 
@@ -1715,6 +1774,30 @@ export function useSensors(localeComputed) {
           point = { ...point, owner: ownerKey, ownerSensorIds: ids, ownerSensorsWithData: bundleOpts };
         } else if (ids?.length) {
           point = { ...point, owner: ownerKey, ownerSensorIds: ids };
+        }
+      }
+    }
+
+    const shouldPickForMapUnit =
+      options.fromMapClick || (!route.query.sensor && Boolean(route.query.owner));
+    if (shouldPickForMapUnit) {
+      const pickedId = pickSensorIdForMapUnit(
+        point,
+        sensors.value,
+        mapState.currentUnit.value,
+        mapState.currentProvider.value
+      );
+      if (pickedId !== String(point.sensor_id || "")) {
+        const row = sensors.value.find((s) => String(s?.sensor_id || "") === pickedId);
+        point = {
+          ...point,
+          sensor_id: pickedId,
+          ...(row?.device_model ? { device_model: row.device_model } : null),
+          geo: point.geo || row?.geo,
+          sensors: point.sensors || row?.sensors || null,
+        };
+        if (options.fromMapClick || !route.query.sensor) {
+          mapState.setMapSettings(route, router, { sensor: pickedId });
         }
       }
     }

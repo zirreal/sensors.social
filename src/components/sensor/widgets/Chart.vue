@@ -65,6 +65,7 @@ import Highcharts from "highcharts";
 import stockInit from "highcharts/modules/stock";
 import { Chart } from "highcharts-vue";
 import unitsettings from "../../../measurements";
+import { MEASUREMENT_GROUPS, MEASUREMENT_GROUP_LOOKUP } from "../../../measurements/groups";
 import { settings } from "@config";
 import { useMap } from "@/composables/useMap";
 import { getPeriodBounds } from "@/utils/date";
@@ -92,19 +93,10 @@ const mapState = useMap();
 
 const chartRef = ref(null);
 
-// Группировка параметров для легенды графика
-const GROUPS = {
-  dust: { members: ["pm10", "pm25"], labelKey: "Dust & Particles" },
-  noise: { members: ["noisemax", "noiseavg", "noise"], labelKey: "Noise" },
-  climate: { members: ["temperature", "humidity"], labelKey: "Climate" },
-};
+const GROUPS = MEASUREMENT_GROUPS;
 
 // Словарь для быстрого поиска группы по параметру
-const GROUPS_LOOKUP = Object.fromEntries(
-  Object.entries(GROUPS).flatMap(([groupName, { members }]) =>
-    members.map((paramId) => [paramId, groupName])
-  )
-);
+const GROUPS_LOOKUP = MEASUREMENT_GROUP_LOOKUP;
 
 // Кэшируем результаты сборки единиц измерения для легенды, чтобы не выполнять
 // тяжелую группировку при каждом реактивном обновлении
@@ -117,6 +109,20 @@ const clearLegendCache = () => {
 };
 
 const UNITS_FOUND = ref(new Set());
+
+function isMapFilterUnit(unit) {
+  const cur = String(unit || "").toLowerCase();
+  return Boolean(cur && unitsettings[cur]);
+}
+
+function isMapUnitAvailableInData(unit, ids) {
+  const cur = String(unit || "").toLowerCase();
+  if (!cur || !ids?.size) return false;
+  if (ids.has(cur)) return true;
+  const groupKey = GROUPS_LOOKUP[cur];
+  if (groupKey) return GROUPS[groupKey].members.some((m) => ids.has(m));
+  return false;
+}
 
 watch(() => locale.value, clearLegendCache);
 watch(() => Array.from(UNITS_FOUND.value).sort().join("|"), clearLegendCache);
@@ -160,17 +166,41 @@ const visibleLegend = computed(() => {
     }
   });
 
+  const mapUnit = String(mapState.currentUnit.value || "").toLowerCase();
+  const mapGroup = GROUPS_LOOKUP[mapUnit];
+  if (mapGroup && unitsettings[mapUnit] && !legend.some((x) => x.key === mapGroup)) {
+    legend.push({ key: mapGroup, labelKey: GROUPS[mapGroup].labelKey, single: false });
+  } else if (
+    !mapGroup &&
+    mapUnit &&
+    unitsettings[mapUnit] &&
+    !legend.some((x) => x.key === mapUnit)
+  ) {
+    const settings = unitsettings[mapUnit];
+    const labelKey =
+      settings?.namelong?.[locale.value] ||
+      settings?.nameshort?.[locale.value] ||
+      mapUnit.toUpperCase();
+    legend.push({ key: mapUnit, labelKey, single: true });
+  }
+
   return legend;
 });
 
 // Определяет активный ключ легенды на основе текущего типа единицы измерения
 const activeLegendKey = computed(() => {
-  const currentGroup = GROUPS_LOOKUP[mapState.currentUnit.value];
-  if (currentGroup && visibleLegend.value.some((x) => x.key === currentGroup)) return currentGroup;
+  const cur = String(mapState.currentUnit.value || "").toLowerCase();
+  const currentGroup = GROUPS_LOOKUP[cur];
+  if (currentGroup) {
+    if (visibleLegend.value.some((x) => x.key === currentGroup)) return currentGroup;
+    if (unitsettings[cur]) return currentGroup;
+  }
 
-  const isSingle = !currentGroup && UNITS_FOUND.value.has(mapState.currentUnit.value);
-  if (isSingle && visibleLegend.value.some((x) => x.key === mapState.currentUnit.value))
-    return mapState.currentUnit.value;
+  const isSingle = !currentGroup && UNITS_FOUND.value.has(cur);
+  if (isSingle && visibleLegend.value.some((x) => x.key === cur)) return cur;
+
+  // Map filter: keep legend on selected unit while logs load.
+  if (!currentGroup && cur && unitsettings[cur]) return cur;
 
   return visibleLegend.value[0]?.key || null;
 });
@@ -1248,8 +1278,11 @@ watch(
     }
 
     // Check if current unit is available
-    const curAvailable = ids.has(cur);
+    const curAvailable = isMapUnitAvailableInData(cur, ids);
     if (curAvailable) return;
+
+    // Honor map-selected metric while popup opens the matching bundle device / logs load.
+    if (isMapFilterUnit(cur)) return;
 
     // Find first available parameter by checking groups in order
     let next = null;
