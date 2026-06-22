@@ -1,4 +1,5 @@
 <template>
+  <!-- TODO: sensor avatar via getAvatar(sensorId) from @/utils/avatarGenerator -->
   <section class="sensor-info-tab">
     <div class="infoline flexline" v-if="sensorId">
       <div class="infoline-title">{{ t("sensorpopup.infosensorid") }}:</div>

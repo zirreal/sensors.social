@@ -38,6 +38,7 @@ const currentProvider = ref(
   localStorage.getItem("provider_type") || settings?.DEFAULT_TYPE_PROVIDER || "remote"
 );
 const timelineMode = ref("day");
+const currentSensorId = ref(null);
 
 export function useMap() {
   const toFinite = (v) => {
@@ -99,10 +100,11 @@ export function useMap() {
     }
   };
 
-  const setTimelineMode = (mode) => {
+  const setTimelineMode = (mode, id) => {
     const m = String(mode || "day");
     if (["day", "week", "month", "realtime"].includes(m)) {
       timelineMode.value = m;
+      currentSensorId.value = id;
     }
   };
 
@@ -131,7 +133,7 @@ export function useMap() {
    * Устанавливает конкретные настройки карты и синхронизирует их
    */
   const setMapSettings = (route, router, settings = {}) => {
-    const { type, date, provider, lat, lng, zoom, sensor } = settings;
+    const { type, date, provider, lat, lng, zoom, sensor, owner } = settings;
 
     // Обновляем composable с новыми значениями
     if (type !== undefined) {
@@ -163,9 +165,34 @@ export function useMap() {
       zoom: mapPosition.zoom,
     };
 
-    // Добавляем sensor если он передан
+    // Add/remove owner only when explicitly provided:
+    // - owner: string -> set `owner=...`
+    // - owner: null -> delete `owner`
+    // - owner: undefined -> keep as-is
+    if (owner !== undefined) {
+      const o = owner === null ? "" : String(owner || "").trim();
+      if (!o) {
+        delete newQuery.owner;
+      } else {
+        newQuery.owner = o;
+      }
+
+      // Ensure stable ordering: owner should appear before sensor in querystring.
+      if (newQuery.sensor !== undefined) {
+        const s = newQuery.sensor;
+        delete newQuery.sensor;
+        newQuery.sensor = s;
+      }
+    }
+
+    // sensor: string -> set; sensor: null | "" -> remove from URL; undefined -> leave as-is
     if (sensor !== undefined) {
-      newQuery.sensor = sensor;
+      const sid = sensor === null ? "" : String(sensor || "").trim();
+      if (!sid) {
+        delete newQuery.sensor;
+      } else {
+        newQuery.sensor = sid;
+      }
     }
 
     router.replace({ query: newQuery }).catch(() => {});
@@ -263,6 +290,7 @@ export function useMap() {
     aqiVersion,
     currentProvider,
     timelineMode,
+    currentSensorId,
 
     // Actions
     setmapposition,

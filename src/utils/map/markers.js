@@ -108,12 +108,12 @@ export function createClusterGroup(iconCreateFn, unit = null) {
     spiderfyOnEveryZoom: false,
     spiderfyOnMaxZoom: true,
     spiderfyDistanceMultiplier: 1.8,
-    zoomToBoundsOnClick: false, // we implement custom click handling
-    spiderfyOnClick: false, // we handle spiderfy manually
-    chunkedLoading: true, // performance boost for many markers
-    chunkDelay: 30,
-    chunkInterval: 200,
-    removeOutsideVisibleBounds: true,
+    zoomToBoundsOnClick: false, // custom click handling (stable UX)
+    spiderfyOnClick: false, // custom click handling
+    chunkedLoading: false,
+    animateAddingMarkers: false,
+    // Important: keep spiderfied child markers visible.
+    removeOutsideVisibleBounds: false,
     iconCreateFunction: (cluster) => iconCreateFn(cluster, unit),
   });
 
@@ -172,36 +172,58 @@ export function attachClusterEvents(layer, clickHandler) {
   layer.on("clusterclick", (e) => {
     const cluster = e.layer;
     const childCount = cluster.getChildCount();
+
+    e.originalEvent?.preventDefault?.();
+    e.originalEvent?.stopPropagation?.();
+
     const nowZoom = map.getZoom();
     const targetZoom = map.getBoundsZoom(cluster.getBounds(), true);
 
-    // если много детей или далеко - зуммируем
-    if (childCount > 15 || targetZoom - nowZoom > 2) {
-      e.originalEvent?.preventDefault?.();
-      e.originalEvent?.stopPropagation?.();
+    const maxZoomCap =
+      childCount <= 2 ? 17 : childCount <= 4 ? 16 : childCount <= 10 ? 17 : 18;
 
+    const shouldZoom = Math.min(targetZoom, maxZoomCap) > nowZoom;
+    if (shouldZoom) {
       map.fitBounds(cluster.getBounds(), {
         padding: [20, 20],
         animate: true,
-        maxZoom: Math.min(targetZoom, 18),
+        maxZoom: maxZoomCap,
       });
-    } else {
-      // Иначе просто spiderfy
-      try {
-        cluster.spiderfy();
-      } catch (error) {
-        console.warn("Spiderfy failed:", error);
-      }
+
+      map.once("zoomend", () => {
+        if (map.getZoom() >= maxZoomCap) {
+          try {
+            cluster.spiderfy();
+          } catch {
+            // ignore
+          }
+        }
+      });
+      return;
+    }
+
+    // Already zoomed in enough: spiderfy to separate overlapping points.
+    try {
+      cluster.spiderfy();
+    } catch {
+      // ignore
     }
   });
 
   // Обработка spiderfied события
   layer.on("spiderfied", (e) => {
+    // Mark layer as "spiderfy open" so background refreshes don't collapse it.
+    layer.__spiderfyOpen = true;
     if (Array.isArray(e.markers)) {
       e.markers.forEach((marker) => {
         attachMarkerEvents(marker, clickHandler);
       });
     }
+  });
+
+  // When spiderfy is closed (by user click/zoom), allow refreshes again.
+  layer.on("unspiderfied", () => {
+    layer.__spiderfyOpen = false;
   });
 }
 
@@ -251,6 +273,7 @@ export function setActiveMarker(markerId, type = "sensor") {
   if (!markerId) return;
 
   const ctx = getMapContext();
+  ctx.activeSensorMarkerId = type === "sensor" ? String(markerId) : null;
 
   // Определяем слой и поле ID в зависимости от типа
   const layer = type === "message" ? ctx.messagesLayer : ctx.markersLayer;
@@ -293,42 +316,33 @@ export function setActiveMarker(markerId, type = "sensor") {
 export function applyActiveMarker(marker) {
   if (!marker) return;
 
-  const { activeMarker } = getMapContext();
+  const ctx = getMapContext();
+  const sameMarker = ctx.activeMarker === marker;
 
-  // Если маркер уже активен, ничего не делаем
-  if (activeMarker && activeMarker === marker) {
-    return;
+  if (!sameMarker) {
+    clearActiveMarker();
+
+    // Touch highlight для мобильных устройств (как при клике)
+    if (IS_TOUCH && marker._icon) {
+      marker._icon.classList.add(MARKER_CLASSES.tapHighlight);
+      setTimeout(() => marker._icon.classList.remove(MARKER_CLASSES.tapHighlight), 550);
+    }
   }
 
-  // Убираем активность с предыдущего маркера
-  clearActiveMarker();
-
-  // Touch highlight для мобильных устройств (как при клике)
-  if (IS_TOUCH && marker._icon) {
-    marker._icon.classList.add(MARKER_CLASSES.tapHighlight);
-    setTimeout(() => marker._icon.classList.remove(MARKER_CLASSES.tapHighlight), 550);
-  }
-
-  // Функция для применения активного класса
   const applyActiveClass = () => {
     const element = marker.getElement();
 
     if (element) {
       element.classList.add(MARKER_CLASSES.active);
-      // Обновляем активный маркер в контексте
-      const ctx = getMapContext();
       ctx.activeMarker = marker;
-    } else {
-      console.log("Element still not ready for marker:", marker);
+      const sid = marker.options?.data?.sensor_id;
+      if (sid) ctx.activeSensorMarkerId = String(sid);
     }
   };
 
-  // Проверяем, готов ли маркер к работе
   if (marker._icon && marker._icon.parentNode) {
-    // Маркер уже готов - применяем активный класс
     applyActiveClass();
   } else {
-    // Ждем события 'add' от Leaflet
     marker.once("add", applyActiveClass);
   }
 }
@@ -337,7 +351,12 @@ export function applyActiveMarker(marker) {
  * Clears active marker state
  */
 export function clearActiveMarker() {
-  const ctx = getMapContext();
+  let ctx;
+  try {
+    ctx = getMapContext();
+  } catch {
+    return;
+  }
 
   if (ctx.activeMarker) {
     const element = ctx.activeMarker.getElement();
@@ -347,6 +366,7 @@ export function clearActiveMarker() {
     }
     ctx.activeMarker = null;
   }
+  ctx.activeSensorMarkerId = null;
 
   // Сбрасываем активную область карты
   if (ctx.map) {

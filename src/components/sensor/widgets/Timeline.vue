@@ -1,37 +1,44 @@
 <template>
   <div class="sensor-timeline">
     <div class="sensor-timeline-top">
-      <!-- <div class="sensor-timeline-left" aria-hidden="true"></div> -->
-      <div class="sensor-timeline-tabs">
+      <div class="sensor-timeline-modes">
+        <div class="sensor-timeline-tabs sensor-timeline-modes--wide">
+          <button
+            v-for="mode in TIMELINE_MODES"
+            :key="mode.id"
+            :class="{ active: timelineMode === mode.id }"
+            @click="handleTimelineModeChange(mode.id)"
+          >
+            {{ mode.label }}
+          </button>
+        </div>
+
         <button
-          :class="{ active: timelineMode === 'realtime' }"
-          @click="handleTimelineModeChange('realtime')"
+          type="button"
+          class="panel-trigger sensor-timeline-modes--compact"
+          popovertarget="timeline-modes-popover"
         >
-          Realtime
+          <span class="panel-list__text">
+            <b class="panel-list__title">{{ timelineModeLabel }}</b>
+          </span>
+          <font-awesome-icon icon="fa-solid fa-caret-down" class="panel-trigger__caret" />
         </button>
-        <button
-          :class="{ active: timelineMode === 'day' }"
-          @click="handleTimelineModeChange('day')"
-        >
-          Day
-        </button>
-        <button
-          :class="{ active: timelineMode === 'week' }"
-          @click="handleTimelineModeChange('week')"
-        >
-          Week
-        </button>
-        <button
-          :class="{ active: timelineMode === 'month' }"
-          @click="handleTimelineModeChange('month')"
-        >
-          Month
-        </button>
+
+        <div ref="modesPopoverRef" id="timeline-modes-popover" class="popover panel-popover" popover>
+          <div class="panel-list" role="listbox">
+            <button
+              v-for="mode in TIMELINE_MODES"
+              :key="mode.id"
+              type="button"
+              class="panel-list__item is-available"
+              :class="{ 'is-active': timelineMode === mode.id }"
+              @click="onTimelineModePick(mode.id)"
+            >
+              <span class="panel-list__title">{{ mode.label }}</span>
+            </button>
+          </div>
+        </div>
       </div>
-<!-- 
-      <div class="sensor-timeline-actions">
-        <slot name="actions" />
-      </div> -->
     </div>
 
     <div class="sensor-timeline-span">
@@ -65,7 +72,6 @@
 <script setup>
 import { reactive, computed, ref, watch, onMounted, onUnmounted, nextTick } from "vue";
 import { useRoute, useRouter } from "vue-router";
-import { useI18n } from "vue-i18n";
 import { useMap } from "@/composables/useMap";
 import { useSensors } from "@/composables/useSensors";
 import { dayISO } from "../../../utils/date";
@@ -79,11 +85,10 @@ const emit = defineEmits(["dateChange"]);
 
 const route = useRoute();
 const router = useRouter();
-const { t } = useI18n();
 const mapState = useMap();
 const sensorsUI = useSensors();
 
-// Локальное состояние
+let timelineMarkerGen = 0;
 const state = reactive({
   timelineMode: "realtime", // 'realtime', 'day', 'week', 'month'
 });
@@ -106,38 +111,85 @@ const pickedDate = computed({
   get: () => mapState.currentDate.value,
   set: (value) => {
     mapState.setCurrentDate(value);
+    // Keep URL in sync (week/month already use setMapSettings; day-only was missing this).
+    if (value && mapState.currentProvider.value === "remote") {
+      mapState.setMapSettings(route, router, { date: value });
+    }
   },
 });
 
+const TIMELINE_MODES = [
+  { id: "realtime", label: "Realtime" },
+  { id: "day", label: "Day" },
+  { id: "week", label: "Week" },
+  { id: "month", label: "Month" },
+];
+
 // Computed для режима таймлайна
 const timelineMode = computed(() => state.timelineMode);
+
+const timelineModeLabel = computed(
+  () => TIMELINE_MODES.find((m) => m.id === timelineMode.value)?.label ?? "Day",
+);
+
+const onTimelineModePick = (mode) => {
+  modesPopoverRef.value?.hidePopover?.();
+  handleTimelineModeChange(mode);
+};
+
+const modesPopoverRef = ref(null);
 
 /**
  * Обрабатывает переключение режима таймлайна
  * @param {string} mode - 'realtime', 'day', 'week', 'month'
  */
 const handleTimelineModeChange = (mode) => {
+  const markerGen = ++timelineMarkerGen;
   state.timelineMode = mode;
+
+  const rebundleMap = () => {
+    if (markerGen !== timelineMarkerGen) return;
+    sensorsUI?.reassertMapMarkers?.();
+  };
 
   // Обнуляем logs при переключении периодов для показа skeleton
   if (props.point?.sensor_id && sensorsUI) {
     sensorsUI.clearSensorLogs(props.point.sensor_id);
   }
 
+  const activeSensorId = props.point?.sensor_id || route.query.sensor;
+  const activeOwner = props.point?.owner || route.query.owner;
+
   if (mode === "realtime") {
-    // Переключаемся на realtime провайдер с текущей датой
     mapState.setMapSettings(route, router, {
       provider: "realtime",
-      date: dayISO(), // Устанавливаем текущую дату
+      date: dayISO(),
+      sensor: activeSensorId || undefined,
+      owner: activeOwner || undefined,
     });
-    mapState.setTimelineMode("realtime");
+    mapState.setTimelineMode("realtime", activeSensorId);
+    rebundleMap();
+    if (activeSensorId) {
+      void sensorsUI?.hydrateOwnerBundleFromUserSensors?.(activeSensorId).then(() => {
+        rebundleMap();
+      });
+    }
   } else {
-    // Для day/week/month переключаемся на remote провайдер
-    mapState.setMapSettings(route, router, { provider: "remote" });
-    mapState.setTimelineMode(mode);
-
-    // Для day/week/month не меняем дату - только переключаем провайдер
-    // Логи будут загружены с правильными границами в updateSensorLogs
+    mapState.setMapSettings(route, router, {
+      provider: "remote",
+      sensor: activeSensorId || undefined,
+      owner: activeOwner || undefined,
+    });
+    mapState.setTimelineMode(mode, activeSensorId);
+    rebundleMap();
+    if (activeSensorId) {
+      void sensorsUI.updateSensorLogs(activeSensorId).then((result) => {
+        if (!result?.ok || result.superseded) return;
+        if (markerGen !== timelineMarkerGen) return;
+        if (result.timelineMode && result.timelineMode !== mapState.timelineMode.value) return;
+        rebundleMap();
+      });
+    }
   }
 };
 
@@ -227,6 +279,7 @@ onMounted(() => {
   // Инициализируем режим таймлайна в зависимости от провайдера
   if (mapState.currentProvider.value === "realtime") {
     state.timelineMode = "realtime";
+    mapState.setTimelineMode("realtime", props.point?.sensor_id);
   } else {
     // Используем глобальное состояние или day по умолчанию
     const globalMode = mapState.timelineMode.value;
@@ -270,6 +323,7 @@ watch(
       // Автоматически переключаем режим таймлайна в зависимости от провайдера
       if (newProvider === "realtime") {
         state.timelineMode = "realtime";
+        mapState.setTimelineMode("realtime", props.point?.sensor_id);
       } else if (state.timelineMode === "realtime") {
         // Если переключились с realtime на remote, переключаемся на day
         state.timelineMode = "day";
@@ -285,30 +339,52 @@ watch(
 }
 
 .sensor-timeline-top {
-  /* display: grid;
-  grid-template-columns: 1fr auto 1fr;
-  align-items: center;
-  gap: calc(var(--gap) * 0.5); */
   text-align: center;
+  display: flex;
+  justify-content: center;
 }
 
-/* .sensor-timeline-left {
-  min-width: var(--app-inputheight);
-} */
+.sensor-timeline-modes--compact {
+  display: none;
+  anchor-name: --timeline-modes-trigger;
+}
 
-/* .sensor-timeline-actions {
-  display: flex;
-  align-items: center;
-  justify-content: flex-end;
-  flex: 0 0 auto;
-} */
-
-.sensor-timeline-tabs {
+.sensor-timeline-tabs.sensor-timeline-modes--wide {
   display: inline-flex;
   border: 1px solid var(--color-middle-gray);
   background-color: var(--color-light-gray);
   border-radius: 20px;
   width: fit-content;
+}
+
+@container sensor-panel (width < 500px) {
+  .panel > .sensor-timeline {
+    flex: 1 1 auto;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+  }
+
+  .sensor-timeline-tabs.sensor-timeline-modes--wide {
+    display: none;
+  }
+
+  .sensor-timeline-modes--compact {
+    display: inline-flex;
+    padding: 0.5rem 1.4rem;
+    border-radius: 20px;
+  }
+}
+
+@supports (position-anchor: --timeline-modes-trigger) {
+  #timeline-modes-popover {
+    position-anchor: --timeline-modes-trigger;
+    top: anchor(bottom);
+    left: anchor(center);
+    translate: -50% 0;
+    margin-top: 10px;
+  }
 }
 
 .sensor-timeline-tabs button {
@@ -327,7 +403,6 @@ watch(
 }
 
 .sensor-timeline-span {
-  margin-bottom: calc(var(--gap) * 0.4);
   text-align: center;
 }
 
@@ -335,6 +410,7 @@ watch(
   display: flex;
   flex-direction: column;
   gap: 0.2rem;
+  margin-top: calc(var(--gap) / 2);
 }
 
 .rt-time {

@@ -42,7 +42,7 @@
       <div class="chart-wrapper">
         <Chart ref="chartRef" constructor-type="stockChart" :options="chartOptions" />
       </div>
-      
+
       <div class="custom-legend">
         <span
           v-for="item in visibleLegend"
@@ -58,7 +58,7 @@
 </template>
 
 <script setup>
-import { ref, watch, computed, nextTick, onMounted } from "vue";
+import { ref, watch, computed, nextTick, onMounted, watchEffect } from "vue";
 import { useRoute, useRouter } from "vue-router";
 import { useI18n } from "vue-i18n";
 import Highcharts from "highcharts";
@@ -77,7 +77,12 @@ Highcharts.setOptions({
 
 const props = defineProps({
   log: { type: Array, default: () => [] },
+  geoAddresses: { type: Object, default: () => ({}) },
+  showGeoInTooltip: { type: Boolean, default: false },
+  addressForTimestamp: { type: Function, default: null },
 });
+
+const emit = defineEmits(["activeLegendChange"]);
 const safeLog = computed(() => (Array.isArray(props.log) ? props.log : []));
 
 const route = useRoute();
@@ -170,7 +175,15 @@ const activeLegendKey = computed(() => {
   return visibleLegend.value[0]?.key || null;
 });
 
-const isRealtime = computed(() => mapState.currentProvider.value === "realtime");
+watch(
+  activeLegendKey,
+  (key) => {
+    emit("activeLegendChange", key);
+  },
+  { immediate: true }
+);
+
+const isRealtime = computed(() => mapState.timelineMode.value === "realtime");
 
 // Получаем экземпляр Highcharts для работы с графиком
 const chart = computed(() => chartRef.value?.chart);
@@ -209,7 +222,6 @@ const yAxisConfig = computed(() =>
     visible: true,
   }))
 );
-
 
 const activeLegendUnits = computed(() => {
   const legendKey = activeLegendKey.value;
@@ -408,6 +420,17 @@ const xAxisConfig = computed(() => {
   };
 });
 
+// Live tooltip context — Highcharts may keep an old formatter; read at hover time.
+const tooltipContext = {
+  showGeo: false,
+  addressFn: null,
+};
+
+watchEffect(() => {
+  tooltipContext.showGeo = props.showGeoInTooltip;
+  tooltipContext.addressFn = props.addressForTimestamp;
+});
+
 // Конфигурация тултипа
 const tooltipConfig = computed(() => ({
   shared: true,
@@ -421,9 +444,27 @@ const tooltipConfig = computed(() => ({
           point.series.userOptions.fullLabel || point.series.name
         }: <b>${point.y.toFixed(2)}</b>`
     );
-    return `<b>${xStr}</b><br/>${rows.join("<br/>")}`;
+    let html = `<b>${xStr}</b><br/>${rows.join("<br/>")}`;
+    if (tooltipContext.showGeo && typeof tooltipContext.addressFn === "function") {
+      const addr = tooltipContext.addressFn(this.x);
+      if (addr) {
+        html += `<br/><span style="opacity:0.85;font-size:0.92em">${addr}</span>`;
+      }
+    }
+    return html;
   },
 }));
+
+watch(
+  () => [props.showGeoInTooltip, props.geoAddresses],
+  () => {
+    const hc = chartRef.value?.chart;
+    if (hc) {
+      hc.update({ tooltip: tooltipConfig.value }, false);
+    }
+  },
+  { deep: true }
+);
 
 // Основная конфигурация графика
 const chartOptions = computed(() => ({
@@ -550,17 +591,25 @@ const updateChart = async (log, legendKey = null) => {
             },
             false
           );
-          existing.setData(ns.data, false, false, false);
           if (typeof prevVis[ns.id] === "boolean") {
             existing.setVisible(prevVis[ns.id], false);
           }
-          // Добавляем только новые точки
-          ns.data
-            .filter((p) => p[0] > (existing.data.at(-1)?.x || 0))
-            .forEach((p) => {
+
+          const lastX = existing.data.at(-1)?.x ?? -Infinity;
+          const newPoints = ns.data.filter((p) => p[0] > lastX);
+
+          if (existing.data.length === 0) {
+            existing.setData(ns.data, false, false, false);
+            maxTime = Math.max(maxTime, ns.data.at(-1)?.[0] || 0);
+          } else if (newPoints.length > 0) {
+            newPoints.forEach((p) => {
               existing.addPoint(p, false, false);
               maxTime = Math.max(maxTime, p[0]);
             });
+          } else if (ns.data.length !== existing.data.length) {
+            existing.setData(ns.data, false, false, false);
+            maxTime = Math.max(maxTime, ns.data.at(-1)?.[0] || 0);
+          }
         } else {
           chart.value.addSeries({ ...ns, visible: true }, false);
           const pts = chart.value.get(ns.id).data;
@@ -1018,6 +1067,9 @@ function clearChartInstantly() {
   const chart = chartRef.value?.chart;
   if (!chart || !chart.series) return;
 
+  seriesCache.clear();
+  chartSeries.value = [];
+
   try {
     // Временно отключаем все анимации
     const originalAnimation = chart.options.chart?.animation;
@@ -1053,10 +1105,16 @@ function clearChartInstantly() {
       }
     }
 
-    // Принудительно перерисовываем
+    // Drop realtime 1h zoom so day/week axes can be set fresh
+    if (chart.xAxis?.[0]) {
+      chart.xAxis[0].setExtremes(null, null, false, false);
+    }
+    if (chart.navigator?.xAxis) {
+      chart.navigator.xAxis.setExtremes(null, null, false, false);
+    }
+
     chart.redraw(false);
 
-    // Восстанавливаем анимации
     if (originalAnimation !== undefined) {
       chart.update(
         {
@@ -1067,7 +1125,6 @@ function clearChartInstantly() {
     }
   } catch (error) {
     console.warn("Error clearing chart:", error);
-    // В случае ошибки просто перерисовываем график
     chart.redraw(false);
   }
 }
@@ -1111,6 +1168,9 @@ watch(
       legendKey !== oldLegendKey
     ) {
       clearChartInstantly();
+      if (timelineMode !== oldTimelineMode) {
+        seriesCache.clear();
+      }
     }
 
     if (!Array.isArray(log) || log.length === 0) return;

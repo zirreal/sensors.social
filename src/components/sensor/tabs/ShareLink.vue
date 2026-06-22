@@ -32,6 +32,32 @@
         <div class="sharelink-settings-item">
           <div>
             <label>
+              <input type="checkbox" v-model="includeSensor" />
+              {{ t("sensorpopup.infosensorid") || "Sensor" }}
+            </label>
+          </div>
+          <select
+            v-model="selectedSensor"
+            :disabled="!includeSensor || sensorSelectOptions.length === 0"
+          >
+            <option v-for="opt in sensorSelectOptions" :key="opt.value" :value="opt.value">
+              {{ opt.label }}
+            </option>
+          </select>
+          <div class="sharelink-settings-hint">
+            {{
+              includeSensor
+                ? t("Share link will open selected sensor popup") ||
+                  "Share link will open selected sensor popup"
+                : t("Share by owner only (no sensor parameter)") ||
+                  "Share by owner only (no sensor parameter)"
+            }}
+          </div>
+        </div>
+
+        <div class="sharelink-settings-item">
+          <div>
+            <label>
               <input type="checkbox" v-model="includeType" />
               {{ t("sensorpopup.type") || "Measurement Type" }}
             </label>
@@ -80,9 +106,10 @@
 </template>
 
 <script setup>
-import { reactive, ref, computed, onBeforeUnmount, getCurrentInstance, watch } from "vue";
+import { reactive, ref, computed, onBeforeUnmount, getCurrentInstance, watch, inject } from "vue";
 import { useI18n } from "vue-i18n";
 import { useRoute } from "vue-router";
+import { SENSOR_PAGE_META_KEY } from "@/composables/useSensorPageMeta";
 import { dayISO } from "../../../utils/date";
 import measurements from "../../../measurements";
 import { settings } from "@config";
@@ -108,19 +135,21 @@ const timer = ref(null);
 const { t, locale } = useI18n();
 const { proxy } = getCurrentInstance();
 const route = useRoute();
-const filters = proxy?.$filters || null;
 
 // Выбранные значения
 const selectedProvider = ref(route.query.provider || "realtime");
 const selectedType = ref(route.query.type || "pm10");
 const selectedDate = ref(route.query.date || dayISO());
+const selectedSensor = ref("");
 
 // Флаги для включения параметров в URL
+// Default share style:
+// - always include concrete `sensor=` by default so a pasted link opens the popup immediately
+// - user can still uncheck "Sensor" to share by owner only
+const includeSensor = ref(true);
 const includeProvider = ref(!!route.query.provider);
 const includeType = ref(!!route.query.type);
 const includeDate = ref(!!route.query.date);
-
-const activePreset = ref(null);
 
 // Получаем доступные типы из данных сенсора
 const availableTypes = computed(() => {
@@ -219,9 +248,16 @@ const generatedLink = computed(() => {
   const baseUrl = window.location.origin + route.path;
   const queryParams = new URLSearchParams();
 
-  // Всегда включаем sensor из текущего URL
-  if (route.query.sensor) {
-    queryParams.set("sensor", route.query.sensor);
+  // Add owner only if we actually have it (legacy sensors keep old URL)
+  const owner = props.point?.owner ? String(props.point.owner).trim() : "";
+  if (owner) {
+    queryParams.set("owner", owner);
+  }
+
+  // Include sensor only if explicitly enabled (or legacy fallback will enable it).
+  const sensorId = String(selectedSensor.value || "").trim();
+  if (includeSensor.value && sensorId) {
+    queryParams.set("sensor", sensorId);
   }
 
   // Добавляем выбранный тип данных только если чекбокс отмечен
@@ -243,89 +279,70 @@ const generatedLink = computed(() => {
   return queryString ? `${baseUrl}?${queryString}` : baseUrl;
 });
 
-function applyPreset(id) {
-  activePreset.value = id;
-  if (id === "realtime-now") {
-    includeProvider.value = true;
-    selectedProvider.value = "realtime";
-    includeType.value = false;
-    includeDate.value = false;
-    return;
+const activeSensorId = computed(() =>
+  String(route.query.sensor || props.point?.sensor_id || "").trim()
+);
+
+const sensorSelectOptions = computed(() => {
+  const active = activeSensorId.value;
+  const list = Array.isArray(props.point?.ownerSensorsWithData)
+    ? props.point.ownerSensorsWithData
+    : [];
+  const ids = new Set();
+  if (active) ids.add(active);
+  for (const o of list) {
+    // show only sensors that actually have data
+    if (o?.hasData !== true) continue;
+    const id = String(o?.id || "").trim();
+    if (id) ids.add(id);
   }
-  if (id === "remote-day") {
-    includeProvider.value = true;
-    selectedProvider.value = "remote";
-    includeDate.value = true;
-    selectedDate.value = dayISO();
-    includeType.value = true;
-    if (typeOptions.value.length > 0) {
-      selectedType.value = typeOptions.value[0].value;
-    }
-    return;
-  }
-}
-
-const derivedPreset = computed(() => {
-  const today = dayISO();
-  const isRealtimeNow =
-    includeProvider.value === true &&
-    selectedProvider.value === "realtime" &&
-    includeType.value === false &&
-    includeDate.value === false;
-  if (isRealtimeNow) return "realtime-now";
-
-  const isRemoteDay =
-    includeProvider.value === true &&
-    selectedProvider.value === "remote" &&
-    includeDate.value === true &&
-    selectedDate.value === today &&
-    includeType.value === true;
-  if (isRemoteDay) return "remote-day";
-
-  return null;
+  return Array.from(ids).map((id) => ({
+    value: id,
+    label: id === active ? `${id} (active)` : id,
+  }));
 });
 
+// Keep selected sensor in sync with active sensor
 watch(
-  derivedPreset,
-  (next) => {
-    activePreset.value = next;
+  activeSensorId,
+  (sid) => {
+    // Always default to include the specific sensor so the link deep-links to the popup.
+    includeSensor.value = true;
+    if (sid) selectedSensor.value = sid;
   },
   { immediate: true }
 );
 
-// Данные для превью Open Graph
+const pageMeta = inject(SENSOR_PAGE_META_KEY, null);
+
+function readMetaContent(selector) {
+  if (typeof document === "undefined") return "";
+  return document.querySelector(selector)?.getAttribute("content") || "";
+}
+
+// Preview matches MetaInfo (reactive when sensor / address / URL params change).
 const ogPreviewData = computed(() => {
-  if (!props.point?.sensor_id) return null;
-
-  const sensorId = props.point.sensor_id;
-  const address = props.point.address || "Unknown location";
-  const shortAddress = address.length > 50 ? address.substring(0, 47) + "..." : address;
-
-  // Сокращаем ID датчика используя фильтр collapse (как в Info.vue)
-  const collapsedSensorId = filters?.collapse ? filters.collapse(sensorId) : sensorId;
-
-  // Превью в UI: стабильный ассет из public (per-sensor PNG в /og-images/ может отсутствовать локально)
-  const baseUrl = window.location.origin;
-  const imageUrl = `${baseUrl}/og-default.webp`;
-
-  // Получаем название типа измерения
-  const typeName =
-    typeOptions.value.find((opt) => opt.value === selectedType.value)?.name ||
-    selectedType.value.toUpperCase();
-
-  // Формируем описание с сокращенным ID датчика
-  const description =
-    selectedProvider.value === "realtime"
-      ? `Real-time ${typeName} measurements from sensor ${collapsedSensorId} at ${address}.`
-      : `${typeName} measurements from sensor ${collapsedSensorId} at ${address}${
-          selectedDate.value ? ` on ${selectedDate.value}` : ""
-        }.`;
-
+  const origin = typeof window !== "undefined" ? window.location.origin : "";
   return {
-    siteName: settings?.SITE_NAME || "Sensors.social",
-    title: `${shortAddress} - ${settings?.TITLE || "Sensors map"}`,
-    description: description,
-    image: imageUrl,
+    siteName:
+      readMetaContent('meta[property="og:site_name"]') ||
+      settings?.SITE_NAME ||
+      "Sensors.social",
+    title:
+      pageMeta?.pageTitle?.value ||
+      readMetaContent('meta[property="og:title"]') ||
+      (typeof document !== "undefined" ? document.title : "") ||
+      settings?.TITLE ||
+      "",
+    description:
+      pageMeta?.pageDescription?.value ||
+      readMetaContent('meta[name="description"]') ||
+      readMetaContent('meta[property="og:description"]') ||
+      settings?.DESC ||
+      "",
+    image:
+      readMetaContent('meta[property="og:image"]') ||
+      (origin ? `${origin}/og-default.webp` : "/og-default.webp"),
     url: generatedLink.value,
   };
 });
@@ -474,6 +491,12 @@ onBeforeUnmount(() => {
   display: flex;
   flex-direction: column;
   gap: calc(var(--gap) * 0.5);
+}
+
+.sharelink-settings-hint {
+  font-size: 0.8em;
+  color: var(--color-gray, #666);
+  line-height: 1.2;
 }
 
 .sharelink-advanced {

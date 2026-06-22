@@ -1,3 +1,15 @@
+/**
+ * Saved Robonomics accounts (login sessions).
+ *
+ * IndexedDB: `Accounts` → object store `Saved` (keyPath: `address`).
+ * Schema: src/config/default/idb-schemas.json
+ *
+ * Record: { phrase, address, type, devices, ts, persist? }
+ *   phrase — encrypted in IDB (plain in memory after load)
+ *
+ * Legacy (migrated on load, then DB deleted):
+ *   `Altruist` → `Accounts` object store
+ */
 import { ref } from "vue";
 import {
   IDBworkflow,
@@ -5,22 +17,110 @@ import {
   IDBdeleteByKey,
   notifyDBChange,
   hasIndexedDB,
+  migrateDB,
   encryptText,
   decryptText,
 } from "../utils/idb";
-import { idbschemas } from "@config";
+import { idbschemas, settings } from "@config";
+import { fetchJson } from "@/utils/utils";
 
-const schema = idbschemas?.Altruist || {};
-const DB_NAME = schema.dbname;
-const STORE = Object.keys(schema.stores || { Accounts: {} })[0] || "Accounts";
+const schema = idbschemas?.Accounts || {};
+const DB_NAME = schema.dbname || "Accounts";
+const STORE = "Saved";
 const SESSION_ACCOUNTS_KEY = "altruist_session_accounts";
 
-// Small in-memory cache for getUserSensors to prevent request storms.
-// - USER_SENSORS_TTL_MS: how long a successful result is considered fresh.
-// - userSensorsCache: stores either the last resolved data with timestamp,
-//   or a pending promise to deduplicate parallel calls for the same owner.
-const USER_SENSORS_TTL_MS = 5 * 60 * 1000; // 5 minutes
+/* =============================================================================
+ * LEGACY MIGRATION — remove this block when Altruist DB is gone for all users
+ * ============================================================================= */
+const LEGACY_ACCOUNTS_DB = "Altruist";
+const LEGACY_ACCOUNTS_STORE = "Accounts";
+let accountsStoreMigrationPromise = null;
+
+async function runAccountsLegacyMigrations() {
+  if (!hasIndexedDB()) return;
+
+  await migrateDB({
+    fromDB: LEGACY_ACCOUNTS_DB,
+    fromStore: LEGACY_ACCOUNTS_STORE,
+    toDB: DB_NAME,
+    toStore: STORE,
+    fromLegacy: true,
+    deleteSourceDB: true,
+    dedupeKey: "address",
+  });
+}
+
+function ensureAccountsStoreMigrated() {
+  if (!accountsStoreMigrationPromise) {
+    accountsStoreMigrationPromise = runAccountsLegacyMigrations().catch((error) => {
+      console.warn("Accounts IDB migration failed:", error);
+      accountsStoreMigrationPromise = null;
+    });
+  }
+  return accountsStoreMigrationPromise;
+}
+/* ============================================================================= */
+
+// In-memory cache for getUserSensors to prevent request storms.
+const USER_SENSORS_TTL_MS = 15 * 60 * 1000; // 15 minutes
 const userSensorsCache = new Map(); // owner -> { ts, data } | { promise }
+
+/** Sync read of a fresh in-memory getUserSensors result (null if missing or stale). */
+export function peekUserSensorsCache(owner) {
+  const key = String(owner || "").trim();
+  if (!key) return null;
+  const cached = userSensorsCache.get(key);
+  if (cached?.data && Date.now() - cached.ts < USER_SENSORS_TTL_MS) {
+    return cached.data;
+  }
+  return null;
+}
+
+async function fetchOwnerSensorsNetwork(owner) {
+  const key = String(owner || "").trim();
+  if (!key) return [];
+
+  const base = String(settings.REMOTE_PROVIDER || "").replace(/\/$/, "");
+  const result = await fetchJson(
+    `${base}/api/sensor/sensors/${encodeURIComponent(key)}`,
+    { cache: "default" }
+  );
+  const data = Array.isArray(result?.sensors) ? result.sensors.map((id) => String(id)) : [];
+  userSensorsCache.set(key, { ts: Date.now(), data });
+  return data;
+}
+
+/** Owner device ids: RAM cache (15 min) with in-flight dedup, then network. */
+export async function getUserSensorsList(owner, { forceNetwork = false } = {}) {
+  const key = String(owner || "").trim();
+  if (!key) return [];
+
+  if (!forceNetwork) {
+    const mem = peekUserSensorsCache(key);
+    if (mem) return mem;
+  }
+
+  const cached = userSensorsCache.get(key);
+  if (cached?.promise) {
+    return cached.promise;
+  }
+
+  const promise = fetchOwnerSensorsNetwork(key)
+    .catch((error) => {
+      console.warn("getUserSensorsList error:", error);
+      userSensorsCache.delete(key);
+      return [];
+    })
+    .finally(() => {
+      const current = userSensorsCache.get(key);
+      if (current?.promise === promise) {
+        userSensorsCache.delete(key);
+      }
+    });
+
+  userSensorsCache.set(key, { promise });
+  return promise;
+}
 
 // Глобальное состояние аккаунтов (разделяется между всеми экземплярами composable)
 const accounts = ref([]); // [{ phrase, address, type, devices, ts }]
@@ -91,13 +191,13 @@ async function normalizeAccountsFromStorage(list) {
 
 export function useAccounts() {
   const addAccount = async ({ phrase, address, type, devices, ts }, { persist = true } = {}) => {
-    // console.log('addAccount', phrase, address, type, devices, ts, persist)
     const idx = accounts.value.findIndex((a) => a.address === address);
     const item = { phrase, address, type, devices, ts: ts || Date.now(), persist };
     if (idx !== -1) accounts.value[idx] = item;
     else accounts.value.push(item);
 
     if (persist && hasIndexedDB()) {
+      await ensureAccountsStoreMigrated();
       const encryptedPhrase = await encryptPhraseForStorage(phrase);
       const itemForStorage = { ...item, phrase: encryptedPhrase, persist: true };
       IDBworkflow(DB_NAME, STORE, "readwrite", (store) => {
@@ -128,6 +228,7 @@ export function useAccounts() {
     writeSessionAccounts(session);
 
     if (hasIndexedDB()) {
+      await ensureAccountsStoreMigrated();
       await Promise.all(list.map((addr) => IDBdeleteByKey(DB_NAME, STORE, addr)));
       notifyDBChange(DB_NAME, STORE);
     }
@@ -140,7 +241,6 @@ export function useAccounts() {
       persist: false,
     }));
 
-    // Best-effort migration: if legacy plaintext phrases are present in sessionStorage, re-save encrypted.
     const sessionHasLegacyPlain = sessionRaw.some(
       (acc) => typeof acc?.phrase === "string" && String(acc.phrase).trim().length > 0
     );
@@ -161,6 +261,9 @@ export function useAccounts() {
       accounts.value = [...sessionAccounts];
       return accounts.value;
     }
+
+    await ensureAccountsStoreMigrated();
+
     const data = await IDBgettable(DB_NAME, STORE);
     const persistentRaw = Array.isArray(data) ? data : [];
     const persistentAccounts = (await normalizeAccountsFromStorage(persistentRaw)).map((acc) => ({
@@ -168,7 +271,6 @@ export function useAccounts() {
       persist: acc?.persist === false ? false : true,
     }));
 
-    // Best-effort migration: if legacy plaintext phrases are present in IndexedDB, re-save encrypted.
     const legacyPlain = persistentRaw.filter(
       (acc) => typeof acc?.phrase === "string" && String(acc.phrase).trim().length > 0
     );
@@ -189,58 +291,10 @@ export function useAccounts() {
     return accounts.value;
   };
 
-  /**
-   * Fetches the list of sensors for a given owner with basic request coalescing and TTL cache.
-   *
-   * Behavior:
-   * - Returns cached data if it's younger than USER_SENSORS_TTL_MS.
-   * - If there is an in-flight request for the same owner, returns that promise instead of firing a new one.
-   * - On success, caches the result with a timestamp; on failure, clears pending state and returns an empty array.
-   *
-   * Rationale:
-   * - This method can be called by multiple UI parts at startup (App.vue, Login.vue, etc.).
-   * - Without coalescing, it may create many identical XHRs and cause UI hitches.
-   */
-  const getUserSensors = async (owner) => {
-    const key = String(owner || "").trim();
-    if (!key) return [];
-
-    const now = Date.now();
-    const cached = userSensorsCache.get(key);
-
-    // Serve fresh cache
-    if (cached && cached.data && now - cached.ts < USER_SENSORS_TTL_MS) {
-      return cached.data;
-    }
-    // Share in-flight request
-    if (cached && cached.promise) {
-      return cached.promise;
-    }
-
-    const promise = (async () => {
-      try {
-        const response = await fetch(`https://roseman.airalab.org/api/sensor/sensors/${key}`);
-        if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
-        const result = await response.json();
-        const data = Array.isArray(result.sensors) ? result.sensors : [];
-        userSensorsCache.set(key, { ts: Date.now(), data });
-        return data;
-      } catch (error) {
-        console.warn("getUserSensors error:", error);
-        userSensorsCache.delete(key);
-        return [];
-      }
-    })();
-
-    userSensorsCache.set(key, { promise });
-    return promise;
-  };
+  const getUserSensors = (owner, options) => getUserSensorsList(owner, options);
 
   return {
-    // State
     accounts,
-
-    // Actions
     addAccount,
     removeAccounts,
     getAccounts,

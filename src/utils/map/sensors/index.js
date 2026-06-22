@@ -39,30 +39,61 @@ function upsertMarker(point, colors, sensor_id = null) {
 
   // Если маркер существует, обновляем его
   if (existingMarker) {
-    // Проверяем, был ли маркер активным
-    const wasActive = existingMarker.getElement()?.classList.contains(MARKER_CLASSES.active);
+    const ctx = getMapContext();
+    const spiderfyOpen = Boolean(ctx?.markersLayer?.__spiderfyOpen);
+
+    const markerId = String(point.sensor_id || "");
+    const shouldStayActive =
+      ctx.activeSensorMarkerId === markerId ||
+      existingMarker.getElement()?.classList.contains(MARKER_CLASSES.active);
 
     // Update marker data first
     existingMarker.options.data = point;
 
-    // Обновляем иконку
-    existingMarker.setIcon(
-      icons.createIconPoint({
-        image: point.iconLocal,
-        colors: colors,
-        isBookmarked: point.isBookmarked,
-        id: point.sensor_id,
-      })
-    );
+    // Обновляем иконку только когда она реально изменилась.
+    // Important: while a cluster is spiderfied, avoid calling `setIcon()` on child markers.
+    // Markercluster treats icon changes as a reason to recalculate clusters, which can
+    // collapse the spiderfy "web" after a short delay.
+    const prevData = existingMarker.options.data;
+    const iconUnchanged =
+      prevData?.iconLocal === point.iconLocal &&
+      Boolean(prevData?.markerIconFullBleed) === Boolean(point.markerIconFullBleed);
+    if (!spiderfyOpen && !iconUnchanged) {
+      existingMarker.setIcon(
+        icons.createIconPoint({
+          image: point.iconLocal,
+          colors: point.markerIconFullBleed ? null : colors,
+          isBookmarked: point.isBookmarked,
+          id: point.sensor_id,
+        })
+      );
+    }
 
     // Применяем вычисленные координаты
-    existingMarker.setLatLng(new L.LatLng(coord[0], coord[1]));
+    // Important: avoid forcing recluster/unspiderfy on every data tick.
+    try {
+      const prev = existingMarker.getLatLng?.();
+      const nextLat = Number(coord[0]);
+      const nextLng = Number(coord[1]);
+      const same =
+        prev &&
+        Number.isFinite(nextLat) &&
+        Number.isFinite(nextLng) &&
+        Math.abs(prev.lat - nextLat) < 1e-10 &&
+        Math.abs(prev.lng - nextLng) < 1e-10;
+      if (!same) {
+        existingMarker.setLatLng(new L.LatLng(nextLat, nextLng));
+      }
+    } catch {
+      existingMarker.setLatLng(new L.LatLng(coord[0], coord[1]));
+    }
 
-    // Восстанавливаем активный класс если маркер был активным
-    if (wasActive) {
+    if (shouldStayActive) {
       const element = existingMarker.getElement();
       if (element) {
         element.classList.add(MARKER_CLASSES.active);
+        ctx.activeMarker = existingMarker;
+        ctx.activeSensorMarkerId = markerId;
       }
     }
 
@@ -73,8 +104,8 @@ function upsertMarker(point, colors, sensor_id = null) {
   const marker = icons.createMarker(
     coord,
     point,
-    colors,
-    point.iconLocal, // image (null для circle маркеров)
+    point.markerIconFullBleed ? null : colors,
+    point.iconLocal,
     markerType
   );
 
@@ -182,8 +213,15 @@ export function switchMessagesLayer(map, enabled = false) {
 }
 
 export function refreshClusters() {
-  const ctx = getMapContext();
+  let ctx;
+  try {
+    ctx = getMapContext();
+  } catch {
+    return;
+  }
   if (ctx.markersLayer) {
+    // If a cluster is currently spiderfied, refreshing clusters collapses the web.
+    if (ctx.markersLayer.__spiderfyOpen) return;
     ctx.markersLayer.refreshClusters();
   }
 }

@@ -1,10 +1,61 @@
 <template>
   <div class="analytics-tab">
-    <Timeline :log="log" :point="point">
-      <!-- <template #actions>
-        <NativeShare />
-      </template> -->
-    </Timeline>
+
+    <div class="panel">
+      <SensorPicker v-if="isSensorPickerReady" :point="point" :log="log" />
+      <div v-else class="panel-skeleton panel-skeleton--trigger" aria-hidden="true" />
+
+      <Timeline :log="log" :point="point" />
+
+      <button
+        v-if="ownerKey"
+        type="button"
+        class="panel-trigger panel-trigger--owner"
+        popovertarget="data-owner-popover"
+      >
+        <div class="panel-list__media panel-list__media--round" aria-hidden="true">
+          <img v-if="ownerAvatar" :src="ownerAvatar" alt="" />
+        </div>
+        <div class="panel-list__text">
+          <b class="panel-list__title">{{ t("sensorpopup.infosensorowner") }}</b>
+          <span class="panel-list__meta">{{ formatSensorIdShort(ownerKey) }}</span>
+        </div>
+        <font-awesome-icon icon="fa-solid fa-caret-down" class="panel-trigger__caret" aria-hidden="true" />
+      </button>
+      <div v-else-if="isOwnerLoading && sensorType !== 'diy'" class="panel-skeleton panel-skeleton--trigger" aria-hidden="true" />
+      <div v-else-if="sensorType === 'diy'" class="panel-owner-spacer" aria-hidden="true" />
+      <div
+        v-else
+        class="panel-trigger panel-trigger--owner panel-trigger--placeholder"
+        aria-hidden="true"
+      >
+        <div class="panel-list__media panel-list__media--round" />
+        <div class="panel-list__text">
+          <b class="panel-list__title">{{ t("sensorpopup.infosensorowner") }}</b>
+          <span class="panel-list__meta">{{ ownerPlaceholderMeta }}</span>
+        </div>
+        <font-awesome-icon icon="fa-solid fa-caret-down" class="panel-trigger__caret" aria-hidden="true" />
+      </div>
+      <div id="data-owner-popover" class="popover panel-popover panel-popover--end" popover>
+        <div class="panel-list__item panel-list__item--static">
+          <div class="panel-list__media panel-list__media--round" aria-hidden="true">
+            <img v-if="ownerAvatar" :src="ownerAvatar" alt="" />
+          </div>
+          <div class="panel-list__text">
+            <b class="panel-list__title">{{ t("sensorpopup.infosensorowner") }}</b>
+            <span class="panel-list__meta">{{ formatSensorIdShort(ownerKey) }}</span>
+          </div>
+        </div>
+        <p v-if="isOwnerLoggedIn" class="panel-popover__footer">
+          {{ t("Share your insights with the community!") }}
+        </p>
+        <p v-else class="panel-popover__footer">
+          {{ t("To add info and stories") }}
+          <router-link to="/login/">{{ t("Login") }}</router-link>
+        </p>
+      </div>
+    </div>
+
 
     <section
       v-if="
@@ -27,29 +78,20 @@
         </div>
       </div>
 
-      <!-- Временно скрыто: панель предупреждений logs health — возможно понадобится позже -->
-      <!--
-      <div v-if="showLogsHealthWarningBanner" class="logs-health-warning-banner">
-        <div>
-          <span>{{
-            $t("logs_health_unhealthy_period", { groups: unhealthyGroupsListDisplay })
-          }}</span>
-          <a href="#" @click.prevent="onLogsHealthDontShowWarningsForSensor">
-            {{ t("Don't show any data warnings for this device") }}
-          </a>
-        </div>
-
-        <button
-          type="button"
-          class="button button-round-outline"
-          @click="onLogsHealthShowDataAnyway"
-        >
-          <font-awesome-icon icon="fa-solid fa-xmark" />
-        </button>
+      <div v-if="chartHasData" class="chart-area">
+        <ChartHealthWarning
+          :log="log"
+          :sensor-id="point?.sensor_id"
+          :legend-key="chartActiveLegendKey"
+        />
+        <Chart
+          :log="log"
+          :geo-addresses="chartGeoAddresses"
+          :show-geo-in-tooltip="showChartGeoInTooltip"
+          :address-for-timestamp="chartAddressForTimestamp"
+          @active-legend-change="chartActiveLegendKey = $event"
+        />
       </div>
-      -->
-
-      <Chart v-if="chartHasData" :log="log" />
       <div v-else-if="showNoDataMessage" class="no-data-message">
         {{ $t("No data available") }}
       </div>
@@ -57,8 +99,8 @@
     </section>
 
     <section class="info-wrap">
-      <Accordion v-if="units && scales && scales.length > 0">
-        <template #title>{{ t("scales.title") }}</template>
+      <div v-if="units && scales && scales.length > 0" class="scales-block">
+        <p class="scales-title">{{ t("scales.title") }}</p>
         <div class="scalegrid">
           <div v-for="item in scales" :key="item.label">
             <template v-if="item?.zones && (item.name || item.label)">
@@ -88,11 +130,7 @@
             </template>
           </div>
         </div>
-      </Accordion>
-
-      <section>
-        <Bookmark v-if="point?.sensor_id" :point="point" />
-      </section>
+      </div>
 
       <div
         v-if="showLogsHealthUserhideNotice"
@@ -115,26 +153,26 @@
 </template>
 
 <script setup>
-import { computed, ref, watch } from "vue";
+import { computed, ref, watch, inject } from "vue";
 import { useI18n } from "vue-i18n";
 import { useMap } from "@/composables/useMap";
-import { useSensors } from "@/composables/useSensors";
+import { useSensors, formatSensorIdShort, isPanelSensorPickerReady, isPanelOwnerLoading, resolveSensorType } from "@/composables/useSensors";
+import { useAccounts } from "@/composables/useAccounts";
+import { getAvatar } from "@/utils/avatarGenerator";
 import {
   clearAllLogsHealthUserHide,
   loadLogsHealth,
-  // setLogsHealthDayUserHide,
-  // setLogsHealthSensorUserHide,
   useLogsHealth,
 } from "@/utils/calculations/sensor/logs_health.js";
-// import { enumeratePeriodDates } from "@/utils/date";
 import measurements from "../../../measurements";
 
 import AQI from "../widgets/AQI.vue";
 import Chart from "../widgets/Chart.vue";
+import ChartHealthWarning from "../widgets/ChartHealthWarning.vue";
+import { LOG_GEO_ADDRESSES_KEY } from "@/composables/useLogGeoAddresses";
+import SensorPicker from "../widgets/SensorPicker.vue";
 import Timeline from "../widgets/Timeline.vue";
 // import NativeShare from "../widgets/NativeShare.vue";
-import Accordion from "../../controls/Accordion.vue";
-import Bookmark from "../widgets/Bookmark.vue";
 
 const props = defineProps({
   point: Object,
@@ -143,27 +181,39 @@ const props = defineProps({
 
 const { t } = useI18n();
 const mapState = useMap();
+const accountStore = useAccounts();
 const localeComputed = computed(() => localStorage.getItem("locale") || "en");
 const { logsProgress, runLogsHealth } = useSensors(localeComputed);
 const { logsHealth, logsHealthMeta } = useLogsHealth();
+const logGeoAddresses = inject(LOG_GEO_ADDRESSES_KEY, null);
+const chartGeoAddresses = computed(() => logGeoAddresses?.geoAddresses?.value || {});
+const showChartGeoInTooltip = computed(() => Boolean(logGeoAddresses?.showGeoInTooltip?.value));
+const chartAddressForTimestamp = (...args) => logGeoAddresses?.addressForTimestamp?.(...args);
 
-// Временно скрыто вместе с панелью logs-health-warning-banner — возможно понадобится позже
-/*
-const chartLogsHealthUi = computed(() => (runLogsHealth.value ? logsHealth.value : null));
+const ownerKey = computed(() => String(props.point?.owner || "").trim());
+const ownerAvatar = ref(null);
+const ownerPlaceholderMeta = formatSensorIdShort("00000000000000000000000000000000");
 
-const unhealthyGroupLabels = computed(() => {
-  const lh = chartLogsHealthUi.value;
-  if (!lh) return [];
-  const rows = [
-    { cat: "pm", labelKey: "Dust & Particles" },
-    { cat: "climate", labelKey: "Climate" },
-    { cat: "noise", labelKey: "Noise" },
-  ];
-  return rows.filter(({ cat }) => lh[cat]?.healthy === false).map(({ labelKey }) => t(labelKey));
+const isSensorPickerReady = computed(() => isPanelSensorPickerReady(props.point));
+const isOwnerLoading = computed(() => isPanelOwnerLoading(props.point));
+const sensorType = computed(() => resolveSensorType(props.point, props.log));
+
+const isOwnerLoggedIn = computed(() => {
+  const owner = ownerKey.value;
+  if (!owner) return false;
+  const accounts = Array.isArray(accountStore.accounts?.value) ? accountStore.accounts.value : [];
+  return accounts.some((acc) => String(acc?.address || "").trim() === owner);
 });
 
-const unhealthyGroupsListDisplay = computed(() => unhealthyGroupLabels.value.join(", "));
-*/
+watch(
+  ownerKey,
+  async (addr) => {
+    ownerAvatar.value = addr ? await getAvatar(addr, 44) : null;
+  },
+  { immediate: true }
+);
+
+const chartActiveLegendKey = ref(null);
 
 const logsHealthSensorUserHide = computed(() =>
   Boolean(
@@ -185,42 +235,17 @@ const onShowSensorWarningsAgain = async () => {
   await loadLogsHealth(id, props.log, logsHealthReloadContext());
 };
 
-/*
-const onLogsHealthShowDataAnyway = async () => {
-  const id = props.point?.sensor_id;
-  if (!id || !runLogsHealth.value) return;
-  const mode = mapState.timelineMode.value;
-  const dates = enumeratePeriodDates(mapState.currentDate.value, mode);
-  for (const dayIso of dates) {
-    await setLogsHealthDayUserHide(id, dayIso, true);
-  }
-  await loadLogsHealth(id, props.log, logsHealthReloadContext());
-};
-
-const onLogsHealthDontShowWarningsForSensor = async () => {
-  const id = props.point?.sensor_id;
-  if (!id || !runLogsHealth.value) return;
-  await setLogsHealthSensorUserHide(id, true);
-  await loadLogsHealth(id, props.log, logsHealthReloadContext());
-};
-*/
-
 const hasLogs = computed(() => Array.isArray(props.log) && props.log.length > 0);
 
-const chartHasData = computed(
-  () => Array.isArray(props.point?.logs) && props.point.logs.length > 0
-);
+// Same source as `log` from parent: `null` = loading → skeleton; `[]` = empty → message; data → chart
+const chartHasData = computed(() => Array.isArray(props.log) && props.log.length > 0);
 
-/*
-const showLogsHealthWarningBanner = computed(
-  () =>
-    runLogsHealth.value &&
-    hasLogs.value &&
-    chartHasData.value &&
-    unhealthyGroupLabels.value.length > 0 &&
-    !logsHealthSensorUserHide.value
+watch(
+  () => chartHasData.value,
+  (hasData) => {
+    if (!hasData) chartActiveLegendKey.value = null;
+  }
 );
-*/
 
 /** Только глобальный userhide по сенсору (record.userhide). Ссылка по-прежнему снимает все userhide (дни + корень). */
 const showLogsHealthUserhideNotice = computed(
@@ -228,9 +253,18 @@ const showLogsHealthUserhideNotice = computed(
 );
 
 const showNoDataMessage = computed(() => {
-  // "No data" should show for any provider once logs are loaded as an empty array.
-  // `null` means "still loading / not loaded".
-  return Array.isArray(props.log) && props.log.length === 0;
+  // `null` = still loading → skeleton (not this message).
+  // `[]` = fetch finished with no points → "No data available".
+  // Realtime: keep skeleton until _logsKey is set (API finished and sensor is live).
+  if (!Array.isArray(props.log) || props.log.length > 0) return false;
+  if (
+    mapState.currentProvider.value === "realtime" &&
+    mapState.timelineMode.value === "realtime" &&
+    !props.point?._logsKey
+  ) {
+    return false;
+  }
+  return true;
 });
 
 // Проверяем, здоровы ли данные PM (для отображения AQI)
@@ -359,6 +393,33 @@ watch(
   }
 }
 
+
+/* - Top panel */
+.panel-trigger--owner {
+  anchor-name: --data-owner-trigger;
+}
+
+@supports (position-anchor: --data-owner-trigger) {
+  .panel-popover--end {
+    position-anchor: --data-owner-trigger;
+    top: anchor(bottom);
+    right: anchor(right);
+    left: auto;
+    margin-top: 10px;
+  }
+}
+/* - Top panel */
+
+
+.scales-block {
+  margin-bottom: calc(var(--gap) * 2);
+}
+
+.scales-title {
+  font-weight: 600;
+  margin-bottom: var(--gap);
+}
+
 .scalegrid {
   display: grid;
   grid-template-columns: repeat(3, 1fr);
@@ -420,44 +481,25 @@ watch(
   color: var(--color-dark);
 }
 
+.chart-area {
+  position: relative;
+}
+
 .logs-health-warning-banner {
   padding: var(--gap);
   border-radius: var(--radius-sm);
   background-color: color-mix(in srgb, var(--color-orange) 22%, transparent);
   border: 1px solid color-mix(in srgb, var(--color-orange) 45%, transparent);
   margin-bottom: var(--gap);
-  display: grid;
-  grid-template-columns: auto auto;
-  gap: var(--gap);
-  align-items: start;
-  justify-content: space-between;
-}
-
-.logs-health-warning-banner .button-round-outline {
-  background-color: transparent;
-}
-
-.logs-health-warning-banner > div {
-  display: flex;
-  flex-direction: column;
-  gap: calc(var(--gap) * 0.8);
 }
 
 .logs-health-warning-banner a {
-  align-self: flex-start;
-  text-decoration: none;
-  border-bottom: 1px dashed var(--color-red);
-  color: var(--color-red);
-  font-weight: bold;
-}
-
-.logs-health-warning-banner button {
-  width: calc(var(--app-inputheight) * 0.8);
-  height: calc(var(--app-inputheight) * 0.8);
+  color: var(--color-blue);
+  font-size: 0.85em;
 }
 
 .logs-health-userhide-notice {
-  grid-template-columns: 1fr;
+  font-size: 0.9em;
 }
 
 .bugged-sensor {
@@ -486,3 +528,4 @@ watch(
   }
 }
 </style>
+

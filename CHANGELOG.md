@@ -1,4 +1,52 @@
-v4.0.4
+## v4.1.0
+
+### One map marker for nearby owner devices
+
+**Viewing data from your own sensors is now easier and more pleasant**
+
+Sensors that share the same Robonomics owner and sit within 3 km of each other are shown as one map marker instead of one dot per device ID. If the same owner has devices farther apart (e.g. in different cities), they keep separate markers — bundling is per location, not per owner globally.
+
+This works for any owned sensors on the Robonomics network, including DIY builds, but is especially useful when one person runs several **[Altruist Air Quality Sensors](https://cyberpunks.shop)** — for example Urban outdoors and Insight indoors at the same place.
+
+### Device icons on map markers
+
+**Finding the sensor you need is quicker at a glance.**
+
+To make the map easier and more pleasant to read, each marker now shows its device type — Urban, Insight, DIY, and so on.
+
+### More informative sensor health warnings
+
+**You can now see exactly which readings our algorithm flagged as unreliable.**
+
+The warning has a cleaner design, appears only when the chart shows suspect data for the active tab, and the popup names the specific metrics that may be wrong.
+
+### Dynamic sensor addresses
+
+**Chart tooltips can now show the address for each reading.**
+
+If a sensor moved during the period you are viewing (day, week, or month), the tooltip shows where each measurement was taken. The popup header uses the address from the sensor’s latest location.
+
+### Unique meta tags when sharing
+
+**Share a sensor page on social media or in messages with richer link previews.**
+
+The page title includes the sensor’s address (or a short device ID), and the description names the measurement type you are viewing.
+
+### Removed old export
+
+**New upgraded export will come in next releases.**
+
+The old export was not very useful it was global and hard to use.
+
+### Tech note
+
+- Fix: Address cashed and didn't changed after geo changing
+- Feat: RosMan v2 migration
+- Refactor: API requests reduced
+- Refactor: IndexedDB rebuilt structure for better functionallity. Accounts, Sensors was retouched.
+
+
+## v4.0.4
 
 **Stories (new):**
 

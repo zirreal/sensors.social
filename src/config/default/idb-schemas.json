@@ -1,26 +1,20 @@
 {
-  "Altruist": {
-    "dbname": "Altruist",
+  "Accounts": {
+    "dbname": "Accounts",
     "dbversion": 1,
     "stores": {
-      "Accounts": { "keyPath": "address", "autoIncrement": false }
+      "Saved": { "keyPath": "address", "autoIncrement": false }
     }
   },
   "Sensors": {
     "dbname": "Sensors",
-    "dbversion": 4,
-    "logsHealthStore": "logsHealth",
-    "stores": {
-      "sensorData": { "keyPath": "id", "autoIncrement": false },
-      "bookmarks": { "keyPath": "id", "autoIncrement": true },
-      "logsHealth": { "keyPath": "id", "autoIncrement": false }
-    }
-  },
-  "SensorsDBBookmarks": {
-    "dbname": "SensorsDBBookmarks",
     "dbversion": 6,
     "stores": {
-      "bookmarks": { "keyPath": "id", "autoIncrement": true }
+      "sensorData": { "keyPath": "id", "autoIncrement": false },
+      "addresses": { "keyPath": "id", "autoIncrement": false },
+      "bookmarks": { "keyPath": "id", "autoIncrement": true },
+      "logsHealth": { "keyPath": "id", "autoIncrement": false },
+      "mapMarkersData": { "keyPath": "id", "autoIncrement": false }
     }
   }
 }

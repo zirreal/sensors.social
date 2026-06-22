@@ -3,6 +3,7 @@ import Libp2pProvider from "@/providers/libp2p";
 import { getConfigBounds, filterByBounds } from "../map";
 import { hasValidCoordinates, fetchJson } from "../../utils";
 import { dayISO, dayBoundsUnix } from "../../date";
+import { mapLayerUnitIds, sortMapLayerUnits } from "../../../measurements/tools";
 import { settings, excluded_sensors } from "@config";
 
 // Глобальные константы провайдеров
@@ -12,14 +13,618 @@ const LIBP2P_PROVIDER = new Libp2pProvider(settings.LIBP2P);
 // Глобальный объект провайдера
 let providerObj = null;
 
+// In-flight v2 sensor requests (preload + logs share the same payload).
+const sensorV2Inflight = new Map();
+const sensorV2Recent = new Map();
+const SENSOR_V2_RECENT_MS = 60_000;
+
+/**
+ * Day fetch bounds aligned with getSensorDataWithCache: for today end = now, not end-of-day.
+ */
+export function sensorFetchBoundsForDate(isoDate) {
+  const bounds = dayBoundsUnix(isoDate);
+  if (isoDate === dayISO()) {
+    return { start: bounds.start, end: Math.floor(Date.now() / 1000) };
+  }
+  return bounds;
+}
+
+async function fetchSensorV2Payload(sensorId, startTimestamp, endTimestamp, signal = null) {
+  const sid = String(sensorId || "");
+  if (!sid) return null;
+
+  const key = `${sid}:${startTimestamp}:${endTimestamp}`;
+  const recent = sensorV2Recent.get(key);
+  if (recent && Date.now() - recent.ts < SENSOR_V2_RECENT_MS) {
+    return recent.payload;
+  }
+
+  if (sensorV2Inflight.has(key)) {
+    return sensorV2Inflight.get(key);
+  }
+
+  const promise = fetchJson(
+    `${settings.REMOTE_PROVIDER}api/v2/sensor/${sid}/${startTimestamp}/${endTimestamp}`,
+    { cache: "no-store", signal }
+  )
+    .then((payload) => {
+      sensorV2Recent.set(key, { payload, ts: Date.now() });
+      return payload;
+    })
+    .finally(() => {
+      sensorV2Inflight.delete(key);
+    });
+
+  sensorV2Inflight.set(key, promise);
+  return promise;
+}
+
+// Cache latest v2 meta for a sensor to drive UI (owner sensors dropdown, etc.)
+const latestSensorMetaById = new Map();
+
+/** Max distance (km) between points of the same owner to share one map marker. */
+export const OWNER_GEO_CLUSTER_KM = 3;
+
+export function haversineKm(geoA, geoB) {
+  const lat1 = Number(geoA?.lat);
+  const lng1 = Number(geoA?.lng);
+  const lat2 = Number(geoB?.lat);
+  const lng2 = Number(geoB?.lng);
+  if (![lat1, lng1, lat2, lng2].every((n) => Number.isFinite(n))) return Infinity;
+  const R = 6371;
+  const dLat = ((lat2 - lat1) * Math.PI) / 180;
+  const dLng = ((lng2 - lng1) * Math.PI) / 180;
+  const a =
+    Math.sin(dLat / 2) ** 2 +
+    Math.cos((lat1 * Math.PI) / 180) * Math.cos((lat2 * Math.PI) / 180) * Math.sin(dLng / 2) ** 2;
+  return 2 * R * Math.asin(Math.min(1, Math.sqrt(a)));
+}
+
+export function normalizeOwnerKey(item) {
+  return String(item?.owner || "").trim();
+}
+
+/** True when sensor has an explicit `owner` field (not `donated_by`; used for DIY). */
+export function hasSensorOwner(item) {
+  return Boolean(String(item?.owner || "").trim());
+}
+
+export function parseBundleSensorEntry(entry) {
+  if (entry == null) return null;
+  if (typeof entry === "string" || typeof entry === "number") {
+    const sensor_id = String(entry).trim();
+    return sensor_id ? { sensor_id, device_model: null } : null;
+  }
+  if (typeof entry === "object") {
+    const sensor_id = String(entry.sensor_id || entry.id || "").trim();
+    if (!sensor_id) return null;
+    const dm = entry.device_model ?? entry.model ?? null;
+    return {
+      sensor_id,
+      device_model: dm != null ? String(dm).toLowerCase() : null,
+    };
+  }
+  return null;
+}
+
+export function sensorTypeFromDeviceModel(deviceModel) {
+  const m = String(deviceModel || "").toLowerCase();
+  if (m === "insight") return "insight";
+  if (m === "urban") return "urban";
+  if (m === "diy") return "diy";
+  if (m === "altruist") return "altruist";
+  return null;
+}
+
+/**
+ * Infer Urban vs Insight when Roseman omits device_model on bundle entries.
+ * Insight: CO₂ without PM; Urban: PM and/or noise metrics.
+ */
+export function inferDeviceTypeFromLog(log) {
+  if (!Array.isArray(log) || log.length === 0) return null;
+
+  const keys = new Set();
+  const sample = log.length > 100 ? log.slice(-100) : log;
+  for (const item of sample) {
+    const data = item?.data;
+    if (!data || typeof data !== "object") continue;
+    for (const key of Object.keys(data)) {
+      keys.add(String(key).toLowerCase());
+    }
+  }
+  if (keys.size === 0) return null;
+
+  const hasCo2 = keys.has("co2");
+  const hasPm = keys.has("pm25") || keys.has("pm10");
+  const hasNoise = keys.has("noiseavg") || keys.has("noisemax") || keys.has("noise");
+
+  if (hasCo2 && !hasPm) return "insight";
+  if (hasPm || hasNoise) return "urban";
+  return null;
+}
+
+/**
+ * Normalized bundle devices from v2 `sensor.sensors` (supports legacy string[] too).
+ */
+export function listBundleSensorEntries(meta) {
+  const data = meta?.data && typeof meta.data === "object" ? meta.data : {};
+  const owner = String(meta?.owner || "").trim();
+  const raw = Array.isArray(meta?.sensors) ? meta.sensors : [];
+  const entries = raw.map(parseBundleSensorEntry).filter(Boolean);
+
+  const fromList =
+    entries.length > 0
+      ? entries
+      : Object.keys(data).map((sensor_id) => ({ sensor_id, device_model: null }));
+
+  return fromList.filter(({ sensor_id, device_model }) => {
+    const sid = String(sensor_id);
+    const points = data[sid];
+    const hasData = Array.isArray(points) && points.length > 0;
+    const hasModel = !!device_model;
+    if (!hasData && !hasModel) return false;
+    if (owner && sid === owner && !hasModel) return false;
+    return true;
+  });
+}
+
+export function listBundleSensorIds(meta) {
+  return listBundleSensorEntries(meta).map((e) => e.sensor_id);
+}
+
+/** Device role for map rep — device_model only (Insight vs Urban). */
+export function isInsightMapDevice(sensor) {
+  return String(sensor?.device_model || "").toLowerCase() === "insight";
+}
+
+/**
+ * Map marker for an owner geo cluster: prefer Urban, then latest timestamp.
+ */
+export function pickOwnerClusterRepresentative(members) {
+  if (!Array.isArray(members) || members.length === 0) return null;
+
+  const ranked = members.map((m) => {
+    const isInsight = isInsightMapDevice(m);
+    const ts = Number(m?.timestamp || 0);
+    return { m, isInsight, ts };
+  });
+
+  const urbanOnly = ranked.filter((x) => !x.isInsight);
+  const pool = urbanOnly.length > 0 ? urbanOnly : ranked;
+  pool.sort((a, b) => b.ts - a.ts);
+  return pool[0]?.m || members[0];
+}
+
+/**
+ * One map marker per owner within `maxKm`. Distant regions keep separate markers.
+ */
+export function dedupeSensorsForMap(list, maxKm = OWNER_GEO_CLUSTER_KM) {
+  const withoutOwner = [];
+  const byOwner = new Map();
+
+  for (const item of Array.isArray(list) ? list : []) {
+    const owner = normalizeOwnerKey(item);
+    if (!owner) {
+      withoutOwner.push(item);
+      continue;
+    }
+    if (!byOwner.has(owner)) byOwner.set(owner, []);
+    byOwner.get(owner).push(item);
+  }
+
+  const out = [...withoutOwner];
+
+  for (const items of byOwner.values()) {
+    const clusters = [];
+    for (const item of items) {
+      if (!hasValidCoordinates(item?.geo)) continue;
+      const geo = item.geo;
+      let placed = false;
+      for (const c of clusters) {
+        const closeEnough = c.members.some(
+          (m) => hasValidCoordinates(m?.geo) && haversineKm(geo, m.geo) <= maxKm
+        );
+        if (closeEnough) {
+          c.members.push(item);
+          placed = true;
+          break;
+        }
+      }
+      if (!placed) clusters.push({ members: [item] });
+    }
+    for (const c of clusters) {
+      const best = pickOwnerClusterRepresentative(c.members);
+      if (best) out.push(best);
+    }
+  }
+
+  return out;
+}
+
+function dedupeByOwnerProximity(list, maxKm = OWNER_GEO_CLUSTER_KM) {
+  return dedupeSensorsForMap(list, maxKm);
+}
+
+/** Same threshold as map marker drawing (near-null island coords). */
+export const MAP_COORDINATE_TOLERANCE = 0.001;
+
 // Импортируем утилиты для работы с IndexedDB
 import {
   IDBworkflow,
   IDBgettable,
+  IDBgetByKey,
+  IDBputRecord,
   IDBdeleteByKey,
   IDBcleartable,
   notifyDBChange,
 } from "../../idb.js";
+
+const SENSORS_IDB_DB = "Sensors";
+const MAP_MARKERS_DATA_STORE = "mapMarkersData";
+
+/** In-memory slice of the latest maxdata payload (per unit) for sibling lookups. */
+const maxDataApiCache = new Map();
+
+function mapMarkersDataId(unit, isoDate) {
+  return `${String(unit || "").toLowerCase()}:${isoDate}`;
+}
+
+export function getCachedMaxDataValue(sensorId, unit) {
+  const entry = getCachedMaxDataEntry(sensorId, unit);
+  if (!entry) return null;
+  const n = Number(entry.value);
+  return Number.isFinite(n) ? n : null;
+}
+
+export function getCachedMaxDataEntry(sensorId, unit) {
+  const cache = maxDataApiCache.get(unit);
+  const entry = cache?.values?.[String(sensorId || "")];
+  return entry && typeof entry === "object" ? entry : null;
+}
+
+export function clearMaxDataApiCache() {
+  maxDataApiCache.clear();
+}
+
+/** Marker icon types persisted per rep sensor_id (dual / urban / insight / diy). */
+const markerIconMemCache = new Map();
+
+export const MARKER_ICON_TTL_MS = 5 * 60 * 60 * 1000;
+
+function markerIconMemKey(isoDate, sensorId) {
+  return `${isoDate}:${String(sensorId || "")}`;
+}
+
+export function markerIconsIdbKey(isoDate) {
+  return `icons:${isoDate}`;
+}
+
+function markerIconRank(iconType) {
+  if (iconType === "dual") return 3;
+  if (iconType === "insight" || iconType === "urban") return 2;
+  return 1;
+}
+
+function isIconEntryFresh(icon) {
+  if (!icon?.iconType) return false;
+  const updatedAt = Number(icon.updatedAt || 0);
+  if (!updatedAt) return false;
+  return Date.now() - updatedAt < MARKER_ICON_TTL_MS;
+}
+
+function isMarkerIconsRecordStale(record) {
+  if (!record?.icons || typeof record.icons !== "object") return true;
+  const keys = Object.keys(record.icons);
+  if (keys.length === 0) return true;
+  const recordUpdated = Number(record.lastUpdated || 0);
+  if (!recordUpdated || Date.now() - recordUpdated >= MARKER_ICON_TTL_MS) return true;
+  return keys.some((sid) => !isIconEntryFresh(record.icons[sid]));
+}
+
+export function peekMarkerIconCache(sensorId, isoDate, { respectTtl = false } = {}) {
+  if (!sensorId || !isoDate) return null;
+  const entry = markerIconMemCache.get(markerIconMemKey(isoDate, sensorId));
+  if (!entry?.iconType) return null;
+  if (respectTtl && !isIconEntryFresh(entry)) return null;
+  return entry;
+}
+
+export function clearMarkerIconMemCache() {
+  markerIconMemCache.clear();
+}
+
+async function readMarkerIconsRecordFromIdb(isoDate) {
+  try {
+    return await IDBgetByKey(SENSORS_IDB_DB, MAP_MARKERS_DATA_STORE, markerIconsIdbKey(isoDate));
+  } catch {
+    return null;
+  }
+}
+
+/** True when icons for this day should be re-resolved (missing or older than 5 h). */
+export async function isMarkerIconsDayStale(isoDate) {
+  if (!isoDate) return true;
+  const record = await readMarkerIconsRecordFromIdb(isoDate);
+  return isMarkerIconsRecordStale(record);
+}
+
+/** Load all marker icons for a day from IDB into memory (call after loadSensors / before markers). */
+export async function hydrateMarkerIconCacheForDate(isoDate) {
+  if (!isoDate || !rosemanMarkerIconsEnabledForDate(isoDate)) return;
+  const record = await readMarkerIconsRecordFromIdb(isoDate);
+  const icons = record?.icons;
+  if (!icons || typeof icons !== "object") return;
+  for (const [sensorId, icon] of Object.entries(icons)) {
+    if (!icon?.iconType) continue;
+    const key = markerIconMemKey(isoDate, sensorId);
+    const existing = markerIconMemCache.get(key);
+    if (!existing || markerIconRank(icon.iconType) >= markerIconRank(existing.iconType)) {
+      markerIconMemCache.set(key, icon);
+    }
+  }
+}
+
+/**
+ * Persist map marker icon for a rep sensor (stable across popup hydration / realtime).
+ * Never downgrades dual → single-device icon unless `force` (TTL refresh).
+ */
+export async function rememberMarkerIcon(sensorId, isoDate, icon, { force = false } = {}) {
+  const sid = String(sensorId || "");
+  const iconType = icon?.iconType;
+  if (!sid || !isoDate || !iconType) return;
+
+  const memKey = markerIconMemKey(isoDate, sid);
+  const existing = markerIconMemCache.get(memKey);
+  if (existing && markerIconRank(existing.iconType) > markerIconRank(iconType)) {
+    return;
+  }
+
+  const payload = {
+    iconType,
+    fullBleed: Boolean(icon.fullBleed),
+    updatedAt: Date.now(),
+  };
+  markerIconMemCache.set(memKey, payload);
+
+  try {
+    const idbKey = markerIconsIdbKey(isoDate);
+    const prev = (await readMarkerIconsRecordFromIdb(isoDate)) || {
+      id: idbKey,
+      isoDate,
+      icons: {},
+    };
+    const prevIcon = prev.icons?.[sid];
+    if (prevIcon && markerIconRank(prevIcon.iconType) > markerIconRank(iconType)) {
+      markerIconMemCache.set(memKey, { ...prevIcon, updatedAt: prevIcon.updatedAt || payload.updatedAt });
+      return;
+    }
+    await writeMapMarkersDataToIdb({
+      ...prev,
+      id: idbKey,
+      isoDate,
+      icons: { ...(prev.icons || {}), [sid]: payload },
+      lastUpdated: Date.now(),
+    });
+  } catch (error) {
+    console.warn("mapMarkersData icon write failed:", error);
+  }
+}
+
+function rememberMaxDataInMemory(unit, isoDate, start, end, values) {
+  maxDataApiCache.set(unit, { start, end, isoDate, values: values || {} });
+}
+
+function isMaxDataMemoryValid(cached, isoDate, dayStart) {
+  if (!cached?.values || cached.isoDate !== isoDate || cached.start !== dayStart) return false;
+  return true;
+}
+
+function applyMaxValuesToSensors(sensors, unit, maxValues) {
+  return sensors.map((sensor) => {
+    const entry = maxValues?.[sensor.sensor_id];
+    const value = entry ? (entry.value ?? null) : null;
+    return {
+      ...sensor,
+      maxdata: {
+        ...sensor.maxdata,
+        [unit]: value,
+      },
+    };
+  });
+}
+
+function isPastDayCompleteInIdb(record, dayBounds) {
+  if (!record?.values) return false;
+  return Number(record.start) <= dayBounds.start && Number(record.end) >= dayBounds.end;
+}
+
+async function readMapMarkersDataFromIdb(unit, isoDate) {
+  try {
+    return await IDBgetByKey(SENSORS_IDB_DB, MAP_MARKERS_DATA_STORE, mapMarkersDataId(unit, isoDate));
+  } catch {
+    return null;
+  }
+}
+
+async function writeMapMarkersDataToIdb(record) {
+  try {
+    await IDBputRecord(SENSORS_IDB_DB, MAP_MARKERS_DATA_STORE, record);
+    notifyDBChange(SENSORS_IDB_DB, MAP_MARKERS_DATA_STORE);
+  } catch (error) {
+    console.warn("mapMarkersData IDB write failed:", error);
+  }
+}
+
+/**
+ * Single maxdata entry: memory → IDB → network.
+ * Any network response is always persisted to mapMarkersData IDB + memory cache.
+ */
+export async function ensureMaxDataRecord(unit, isoDate = dayISO(), requestedEnd = null) {
+  const u = String(unit || "").toLowerCase();
+  if (!u) {
+    return { values: {}, start: 0, end: 0, source: "empty" };
+  }
+
+  const dayBounds = dayBoundsUnix(isoDate);
+  const dayStart = dayBounds.start;
+  const isToday = isoDate === dayISO();
+  const end =
+    requestedEnd != null
+      ? Number(requestedEnd)
+      : isToday
+        ? Math.floor(Date.now() / 1000)
+        : dayBounds.end;
+
+  const mem = maxDataApiCache.get(u);
+  if (isMaxDataMemoryValid(mem, isoDate, dayStart)) {
+    if (!isToday || Number(mem.end) >= end) {
+      return { values: mem.values, start: mem.start, end: mem.end, source: "memory" };
+    }
+  }
+
+  const idbRecord = await readMapMarkersDataFromIdb(u, isoDate);
+
+  let fetchStart = dayStart;
+  let fetchEnd = end;
+  let needFetch = false;
+
+  if (!idbRecord?.values) {
+    needFetch = true;
+  } else if (!isToday) {
+    if (isPastDayCompleteInIdb(idbRecord, dayBounds)) {
+      rememberMaxDataInMemory(u, isoDate, idbRecord.start, idbRecord.end, idbRecord.values);
+      return {
+        values: idbRecord.values,
+        start: idbRecord.start,
+        end: idbRecord.end,
+        source: "idb",
+      };
+    }
+    needFetch = true;
+    fetchEnd = dayBounds.end;
+  } else if (!mem) {
+    rememberMaxDataInMemory(u, isoDate, idbRecord.start, idbRecord.end, idbRecord.values);
+    return {
+      values: idbRecord.values,
+      start: idbRecord.start,
+      end: idbRecord.end,
+      source: "idb",
+    };
+  } else if (Number(idbRecord.end) >= end) {
+    rememberMaxDataInMemory(u, isoDate, idbRecord.start, idbRecord.end, idbRecord.values);
+    return {
+      values: idbRecord.values,
+      start: idbRecord.start,
+      end: idbRecord.end,
+      source: "idb",
+    };
+  } else {
+    needFetch = true;
+    fetchStart = Number(idbRecord.start) || dayStart;
+    fetchEnd = end;
+  }
+
+  if (!needFetch) {
+    return {
+      values: mem?.values || idbRecord?.values || {},
+      start: mem?.start ?? idbRecord?.start ?? dayStart,
+      end: mem?.end ?? idbRecord?.end ?? end,
+      source: "memory",
+    };
+  }
+
+  const values = (await REMOTE_PROVIDER.maxValuesForPeriod(fetchStart, fetchEnd, u)) || {};
+  const record = {
+    id: mapMarkersDataId(u, isoDate),
+    unit: u,
+    isoDate,
+    start: fetchStart,
+    end: fetchEnd,
+    values,
+    lastUpdated: Date.now(),
+  };
+
+  await writeMapMarkersDataToIdb(record);
+  rememberMaxDataInMemory(u, isoDate, fetchStart, fetchEnd, values);
+
+  return { values, start: fetchStart, end: fetchEnd, source: "network" };
+}
+
+/** At least one maxdata row is placed on the map (not 0,0). */
+export function maxdataHasMapGeo(values) {
+  if (!values || typeof values !== "object") return false;
+  for (const entry of Object.values(values)) {
+    if (entry?.geo && hasValidCoordinates(entry.geo)) return true;
+  }
+  return false;
+}
+
+/** @deprecated use sortMapLayerUnits from measurements/tools */
+export const sortMeasurementUnits = sortMapLayerUnits;
+
+/** Collect measurement keys from sensors that are drawable on the map (realtime). */
+export function collectUnitsFromMapSensors(sensors) {
+  const units = new Set();
+  for (const sensor of Array.isArray(sensors) ? sensors : []) {
+    if (!hasValidCoordinates(sensor?.geo)) continue;
+    for (const bag of [sensor?.data, sensor?.maxdata]) {
+      if (!bag || typeof bag !== "object") continue;
+      for (const [key, raw] of Object.entries(bag)) {
+        const unit = String(key).toLowerCase();
+        if (!unit || raw === null || raw === undefined) continue;
+        units.add(unit);
+      }
+    }
+  }
+  return sortMapLayerUnits([...units]);
+}
+
+/**
+ * Units with maxdata at a real geo for the day (IDB/memory/network via ensureMaxDataRecord).
+ */
+export async function listMeasurementsOnMap(isoDate = dayISO(), requestedEnd = null) {
+  const dateKey = isoDate || dayISO();
+  const dayBounds = dayBoundsUnix(dateKey);
+  const isToday = dateKey === dayISO();
+  const end =
+    requestedEnd != null
+      ? Number(requestedEnd)
+      : isToday
+        ? Math.floor(Date.now() / 1000)
+        : dayBounds.end;
+
+  const results = await Promise.all(
+    mapLayerUnitIds().map(async (unit) => {
+      const { values } = await ensureMaxDataRecord(unit, dateKey, end);
+      return maxdataHasMapGeo(values) ? unit : null;
+    })
+  );
+
+  return sortMapLayerUnits(results.filter(Boolean));
+}
+
+/** @deprecated use listMeasurementsOnMap */
+export async function filterMeasurementsOnMap(units, start, end, isoDate = dayISO()) {
+  const list =
+    Array.isArray(units) && units.length > 0
+      ? units.map((u) => String(u).toLowerCase())
+      : mapLayerUnitIds();
+  const dateKey = isoDate || dayISO();
+  const dayBounds = dayBoundsUnix(dateKey);
+  const isToday = dateKey === dayISO();
+  const requestedEnd = isToday
+    ? Math.max(Number(end) || 0, Math.floor(Date.now() / 1000))
+    : dayBounds.end;
+
+  const results = await Promise.all(
+    list.map(async (unit) => {
+      const { values } = await ensureMaxDataRecord(unit, dateKey, requestedEnd);
+      return maxdataHasMapGeo(values) ? unit : null;
+    })
+  );
+
+  return sortMapLayerUnits(results.filter(Boolean));
+}
 
 /**
  * Получает максимальные значения с проверкой кэша и обновлением сенсоров
@@ -28,43 +633,23 @@ import {
  * @param {number} end - конечный timestamp
  * @param {string} unit - единица измерения (pm10, pm25, etc.)
  * @param {Array} sensors - массив сенсоров
+ * @param {string} [isoDate] - YYYY-MM-DD (для кэша «сегодня» end может расти)
  * @returns {Array} обновленный массив сенсоров с maxdata
  */
-export async function getMaxData(start, end, unit, sensors) {
-  // Проверяем, есть ли уже данные для этого типа измерения
-  const hasExistingData = sensors.some(
-    (sensor) => sensor.maxdata && sensor.maxdata[unit] !== undefined
-  );
+export async function getMaxData(start, end, unit, sensors, isoDate = dayISO()) {
+  const allHaveUnit =
+    sensors.length > 0 &&
+    sensors.every((sensor) => sensor?.maxdata && sensor.maxdata[unit] !== undefined);
 
-  if (hasExistingData) {
-    // Данные уже есть, возвращаем копию существующих сенсоров для реактивности
+  if (allHaveUnit) {
     return [...sensors];
   }
 
-  // Делаем API запрос
-  const maxValues = await REMOTE_PROVIDER.maxValuesForPeriod(start, end, unit);
+  const isToday = isoDate === dayISO();
+  const requestedEnd = isToday ? Math.floor(Number(end) || Date.now() / 1000) : dayBoundsUnix(isoDate).end;
+  const { values } = await ensureMaxDataRecord(unit, isoDate, requestedEnd);
 
-  // Обновляем maxdata для существующих сенсоров
-  const updatedSensors = sensors.map((sensor) => {
-    const sensorId = sensor.sensor_id;
-    const hasMaxData = maxValues[sensorId];
-
-    if (hasMaxData) {
-      // Новая структура API: {model, geo, timestamp, value}
-      const currentUnitValue = maxValues[sensorId].value;
-
-      return {
-        ...sensor,
-        maxdata: {
-          ...sensor.maxdata, // Сохраняем существующие данные
-          [unit]: currentUnitValue || null,
-        },
-      };
-    }
-    return sensor;
-  });
-
-  return updatedSensors;
+  return applyMaxValuesToSensors(sensors, unit, values);
 }
 
 /**
@@ -104,8 +689,13 @@ export async function getSensors(start, end, provider = "remote") {
         geo: { lat, lng },
         address: sensorData.address || null,
         donated_by: sensorData.donated_by || null,
-        owner: sensorData.owner || null,
+        owner: String(sensorData.owner || "").trim() || null,
+        device_model: sensorData.device_model || null,
         timestamp: sensorData.timestamp || null,
+        sensors:
+          Array.isArray(sensorData.sensors) && sensorData.sensors.length > 0
+            ? sensorData.sensors
+            : null,
       };
 
       if (!hasValidCoordinates({ lat, lng })) {
@@ -142,42 +732,326 @@ function filterSensorsByConfig(sensors) {
   const { mode, sensors: configSensors } = excluded_sensors;
   const sensorIdsSet = new Set(configSensors);
 
-  if (mode === 'include-only') {
+  if (mode === "include-only") {
     // Whitelist: показываем только сенсоры из списка
-    return sensors.filter(sensor => sensorIdsSet.has(sensor.sensor_id));
+    return sensors.filter((sensor) => sensorIdsSet.has(sensor.sensor_id));
   } else {
     // Blacklist (exclude): скрываем сенсоры из списка
-    return sensors.filter(sensor => !sensorIdsSet.has(sensor.sensor_id));
+    return sensors.filter((sensor) => !sensorIdsSet.has(sensor.sensor_id));
   }
 }
 
+// =============================================================================
+// TEMPORARY Roseman owner workaround — remove when a dedicated Roseman owner API
+// ships. The new markers endpoint (`api/v2/sensor/markers/…`) omits `owner` for
+// historical days before ~2026-06-08.
+//
+// On-demand only (popup / getSensorOwner / preloadSensorMeta) — never per-marker
+// on map load. Fallback chain:
+//   1) v2 sensor payload for today (owner often only in recent aggregates)
+//   2) v2 sensor payload for the requested day
+//   3) legacy v1 `api/sensor/{id}/{msStart}/{msEnd}` — 1h window (old sensors.social)
+//
+// Markers before ROSEMAN_MARKER_ICONS_FROM_ISO lack reliable device/owner meta — hide
+// device-type icons on the map until that day (colored circles only).
+// =============================================================================
+
+/** TEMPORARY — first day markers API includes reliable device icon metadata. */
+export const ROSEMAN_MARKER_ICONS_FROM_ISO = "2026-06-08";
+
+export function rosemanMarkerIconsEnabledForDate(isoDate) {
+  const d = String(isoDate || dayISO()).trim();
+  return d >= ROSEMAN_MARKER_ICONS_FROM_ISO;
+}
+
+const rosemanOwnerWorkaroundCache = new Map();
+const ROSEMAN_OWNER_WORKAROUND_TTL_MS = 15 * 60 * 1000;
+
+function cacheRosemanOwnerWorkaroundMeta(sensorId, sensorMeta, owner) {
+  if (!sensorMeta || typeof sensorMeta !== "object") return;
+  const sid = String(sensorId || "").trim();
+  if (!sid) return;
+  cacheSensorMetaForBundle(sid, owner ? { ...sensorMeta, owner } : sensorMeta);
+}
+
 /**
- * Получает owner для конкретного сенсора через короткий запрос
- * @param {string} sensorId - ID сенсора
- * @returns {string|null} owner сенсора или null
+ * TEMPORARY — see block above. Not the final Roseman owner lookup.
  */
-export async function getSensorOwner(sensorId) {
+async function resolveRosemanOwnerWorkaround(sensorId, startTimestamp, endTimestamp) {
+  const sid = String(sensorId || "").trim();
+  if (!sid) return null;
+
+  const cached = rosemanOwnerWorkaroundCache.get(sid);
+  if (cached && Date.now() - cached.ts < ROSEMAN_OWNER_WORKAROUND_TTL_MS) {
+    return cached.owner;
+  }
+
+  let owner = null;
+  const { start: todayStart, end: todayEnd } = sensorFetchBoundsForDate(dayISO());
+
+  try {
+    const todayPayload = await fetchSensorV2Payload(sid, todayStart, todayEnd);
+    owner = normalizeOwnerKey(todayPayload?.sensor);
+    if (owner) cacheRosemanOwnerWorkaroundMeta(sid, todayPayload.sensor, owner);
+  } catch {
+    // ignore
+  }
+
+  if (!owner && (startTimestamp !== todayStart || endTimestamp !== todayEnd)) {
+    try {
+      const periodPayload = await fetchSensorV2Payload(sid, startTimestamp, endTimestamp);
+      owner = normalizeOwnerKey(periodPayload?.sensor);
+      if (owner) cacheRosemanOwnerWorkaroundMeta(sid, periodPayload.sensor, owner);
+    } catch {
+      // ignore
+    }
+  }
+
+  if (!owner) {
+    try {
+      const endMs = Date.now();
+      const startMs = endMs - 3600000;
+      const result = await fetchJson(
+        `${settings.REMOTE_PROVIDER}api/sensor/${sid}/${startMs}/${endMs}`,
+        { cache: "no-store" }
+      );
+      owner = normalizeOwnerKey(result?.sensor);
+      if (owner && result?.sensor) {
+        cacheRosemanOwnerWorkaroundMeta(sid, result.sensor, owner);
+      }
+    } catch {
+      // ignore
+    }
+  }
+
+  rosemanOwnerWorkaroundCache.set(sid, { owner: owner || null, ts: Date.now() });
+  return owner || null;
+}
+
+/**
+ * Получает owner для конкретного сенсора.
+ * TEMPORARY: on-demand resolveRosemanOwnerWorkaround until Roseman owner API.
+ * @param {string} [isoDate] - просматриваемый день (Daily Recap); для дат до 2026-06-08
+ *   workaround также пробует v2 за сегодня.
+ */
+export async function getSensorOwner(sensorId, isoDate = null) {
   if (!sensorId) return null;
 
   try {
-    // Используем короткий промежуток времени - последний час
-    const end = Date.now();
-    const start = end - 3600000; // 1 час назад
+    const sid = String(sensorId);
+    const idb = await getCachedSensorIdbMeta(sid);
+    if (idb?.owner) return normalizeOwnerKey({ owner: idb.owner });
 
-    // Делаем прямой запрос, чтобы получить полный объект ответа с sensor.owner
-    const result = await fetchJson(
-      `${settings.REMOTE_PROVIDER}api/sensor/${sensorId}/${start}/${end}`,
-      { cache: "no-store" }
-    );
-
-    // API возвращает структуру: { result: [], sensor: { owner: "..." } }
-    if (result && result.sensor && result.sensor.owner) {
-      return result.sensor.owner;
+    const cached = getCachedSensorMeta(sid);
+    if (cached) {
+      const owner = normalizeOwnerKey(cached);
+      if (owner) return owner;
     }
 
-    return null;
+    const viewedDay = isoDate || dayISO();
+    const { start, end } = sensorFetchBoundsForDate(viewedDay);
+    return (await resolveRosemanOwnerWorkaround(sid, start, end)) || null;
   } catch (error) {
     console.warn("Failed to load sensor owner:", error);
+    return null;
+  }
+}
+
+function geoFromLogPoints(points) {
+  if (!Array.isArray(points) || points.length === 0) return null;
+  const geo = points[points.length - 1]?.geo;
+  if (!geo || !hasValidCoordinates(geo)) return null;
+  return geo;
+}
+
+/** Cache v2 meta only for the requested device id. */
+function cacheSensorMetaForBundle(requestedId, meta) {
+  if (!meta || typeof meta !== "object") return;
+  const req = requestedId ? String(requestedId) : "";
+  if (req) latestSensorMetaById.set(req, meta);
+}
+
+export function getCachedSensorMeta(sensorId) {
+  if (!sensorId) return null;
+  return latestSensorMetaById.get(String(sensorId)) || null;
+}
+
+export function clearSensorMetaCache() {
+  latestSensorMetaById.clear();
+  clearMaxDataApiCache();
+}
+
+function ownerBySensorIdFromList(sensorsList) {
+  const map = new Map();
+  for (const s of Array.isArray(sensorsList) ? sensorsList : []) {
+    const id = String(s?.sensor_id || "");
+    const owner = normalizeOwnerKey(s);
+    if (id && owner) map.set(id, owner);
+  }
+  return map;
+}
+
+function bundleIdsFromMeta(meta, ownerKey) {
+  if (!meta) return null;
+  const owner = String(ownerKey || "").trim();
+  const metaOwner = normalizeOwnerKey(meta);
+  if (owner && metaOwner && metaOwner !== owner) return null;
+  const ids = new Set();
+  for (const { sensor_id } of listBundleSensorEntries(meta)) {
+    const id = String(sensor_id || "");
+    if (id) ids.add(id);
+  }
+  return ids.size > 0 ? ids : null;
+}
+
+/** Owner-device select: only devices from the active owner's v2 bundle and map list. */
+export function filterBundleOptionsForOwner(items, ownerKey, activeSensorId, sensorsList) {
+  const list = Array.isArray(items) ? items.filter(Boolean) : [];
+  const owner = String(ownerKey || "").trim();
+  if (!owner || list.length === 0) return list;
+
+  const sid = String(activeSensorId || "");
+  const allowed = new Set();
+  const canonicalOwners = ownerBySensorIdFromList(sensorsList);
+
+  const meta = sid ? getCachedSensorMeta(sid) : null;
+  const bundleIds = bundleIdsFromMeta(meta, owner);
+  if (bundleIds) {
+    for (const id of bundleIds) {
+      const listedOwner = canonicalOwners.get(id);
+      if (listedOwner && listedOwner !== owner) continue;
+      allowed.add(id);
+    }
+  }
+
+  for (const [id, listedOwner] of canonicalOwners) {
+    if (listedOwner === owner) allowed.add(id);
+  }
+
+  if (allowed.size === 0) {
+    return sid ? list.filter((o) => String(o?.id || "") === sid) : [];
+  }
+
+  const filtered = list.filter((o) => {
+    const id = String(o?.id || "");
+    if (!id || !allowed.has(id)) return false;
+    const listedOwner = canonicalOwners.get(id);
+    return !listedOwner || listedOwner === owner;
+  });
+
+  if (sid && !filtered.some((o) => String(o.id) === sid)) {
+    const self = list.find((o) => String(o.id) === sid);
+    if (self) return [self, ...filtered];
+  }
+
+  return filtered.length > 0 ? filtered : list;
+}
+
+/**
+ * Keep only owner-bundle siblings within `maxKm` of the anchor. Never widen to other cities.
+ */
+export function filterOwnerBundleNearAnchor(items, anchorGeo, activeSensorId, maxKm = OWNER_GEO_CLUSTER_KM) {
+  const list = Array.isArray(items) ? items.filter(Boolean) : [];
+  if (list.length === 0) return list;
+
+  const withGeo = list.filter((o) => o?.geo && hasValidCoordinates(o.geo));
+  if (!anchorGeo || !hasValidCoordinates(anchorGeo)) {
+    return withGeo;
+  }
+  return withGeo.filter((o) => haversineKm(anchorGeo, o.geo) <= maxKm);
+}
+
+/**
+ * All device ids for an owner present on the map list (fallback when getUserSensors API is empty).
+ */
+export function collectOwnerDeviceIds(ownerKey, sensorsList) {
+  const owner = String(ownerKey || "").trim();
+  if (!owner) return [];
+  return [
+    ...new Set(
+      (Array.isArray(sensorsList) ? sensorsList : [])
+        .filter((s) => normalizeOwnerKey(s) === owner)
+        .map((s) => String(s?.sensor_id || ""))
+        .filter(Boolean)
+    ),
+  ];
+}
+
+export function getOwnerSensorsWithData(
+  sensorId,
+  anchorGeoOverride = null,
+  sensorsList = null,
+  clusterBundle = true
+) {
+  if (!sensorId) return null;
+  const meta = getCachedSensorMeta(sensorId);
+  // Meta may not be loaded yet (async preload). Return null so callers can
+  // keep previous UI options instead of overwriting with an empty list.
+  if (!meta) return null;
+  const data = meta?.data && typeof meta.data === "object" ? meta.data : {};
+  const sid = String(sensorId);
+  const metaOwner = normalizeOwnerKey(meta);
+  const canonicalOwners = ownerBySensorIdFromList(sensorsList);
+
+  const anchorGeo =
+    (anchorGeoOverride && hasValidCoordinates(anchorGeoOverride) ? anchorGeoOverride : null) ||
+    geoFromLogPoints(data?.[sid]) ||
+    null;
+
+  const mapped = listBundleSensorEntries(meta)
+    .map(({ sensor_id, device_model }) => {
+      const id = String(sensor_id);
+      const points = Array.isArray(data[id]) ? data[id] : [];
+      const hasData = points.length > 0;
+      const geo = geoFromLogPoints(points);
+      const inferredType = inferDeviceTypeFromLog(points);
+      return {
+        id,
+        hasData: hasData && hasValidCoordinates(geo),
+        type:
+          sensorTypeFromDeviceModel(device_model) ||
+          inferredType ||
+          null,
+        geo: hasValidCoordinates(geo) ? geo : null,
+        device_model: device_model || inferredType || null,
+      };
+    })
+    .filter((entry) => {
+      const listedOwner = canonicalOwners.get(entry.id);
+      if (listedOwner && metaOwner && listedOwner !== metaOwner) return false;
+      return true;
+    });
+
+  const filtered = clusterBundle
+    ? filterOwnerBundleNearAnchor(mapped, anchorGeo, sid)
+    : mapped.filter((o) => o?.geo && hasValidCoordinates(o.geo));
+  return filtered.length > 0 ? filtered : null;
+}
+
+/**
+ * Preloads v2 `{ sensor: { sensors, data, owner } }` meta and caches it,
+ * so UI (owner dropdown) can render before full logs are loaded.
+ */
+export async function preloadSensorMeta(sensorId, startTimestamp, endTimestamp, signal = null) {
+  if (!sensorId) return null;
+  try {
+    const payload = await fetchSensorV2Payload(sensorId, startTimestamp, endTimestamp, signal);
+    if (payload?.sensor && typeof payload.sensor === "object") {
+      let meta = payload.sensor;
+      if (!normalizeOwnerKey(meta)) {
+        const owner = await resolveRosemanOwnerWorkaround(
+          sensorId,
+          startTimestamp,
+          endTimestamp
+        );
+        if (owner) meta = { ...meta, owner };
+      }
+      cacheSensorMetaForBundle(sensorId, meta);
+      return meta;
+    }
+    return null;
+  } catch (error) {
+    if (signal && signal.aborted) return null;
     return null;
   }
 }
@@ -234,11 +1108,16 @@ export async function getSensorData(
         return Array.isArray(historyData) ? historyData : null;
       }
     } else {
-      const historyData = await REMOTE_PROVIDER.getHistoryPeriodBySensor(
+      const payload = await fetchSensorV2Payload(
         sensorId,
         startTimestamp,
-        endTimestamp
+        endTimestamp,
+        signal
       );
+      if (payload?.sensor && typeof payload.sensor === "object") {
+        cacheSensorMetaForBundle(sensorId, payload.sensor);
+      }
+      const historyData = payload?.result;
       // Если данных нет, возвращаем [] (загружено, но пусто), если null/undefined - null (не загружено)
       return Array.isArray(historyData) ? historyData : null;
     }
@@ -331,7 +1210,90 @@ export function unsubscribeRealtime(unwatch) {
   }
 }
 
+let sensorCitiesCache = null;
+let sensorCitiesPromise = null;
+
+/**
+ * Cities list for history CSV export. One GET per session.
+ * Provider health check uses HEAD in remote Provider.status().
+ */
+export async function fetchSensorCities() {
+  if (sensorCitiesCache) return sensorCitiesCache;
+  if (sensorCitiesPromise) return sensorCitiesPromise;
+
+  sensorCitiesPromise = fetch(`${settings.REMOTE_PROVIDER}api/sensor/cities`, { cache: "default" })
+    .then(async (res) => {
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const json = await res.json();
+      const data = json?.result;
+      if (!data || typeof data !== "object") throw new Error("Invalid cities payload");
+      sensorCitiesCache = data;
+      return data;
+    })
+    .finally(() => {
+      sensorCitiesPromise = null;
+    });
+
+  return sensorCitiesPromise;
+}
+
 // ==================== INDEXEDDB CACHE FUNCTIONS ====================
+
+const SENSOR_IDB_TTL = 24 * 60 * 60 * 1000; // 24 часа
+
+function stripSensorCacheAddress(entry) {
+  if (!entry || !("address" in entry)) return entry;
+  const { address: _removed, ...rest } = entry;
+  return rest;
+}
+
+function readSensorIdbEntry(sensorId) {
+  const sensorKey = String(sensorId || "");
+  if (!sensorKey) return Promise.resolve(null);
+
+  return new Promise((resolve) => {
+    IDBworkflow("Sensors", "sensorData", "readonly", (store) => {
+      const request = store.get(sensorKey);
+      request.onsuccess = () => {
+        const result = request.result || null;
+        if (result && "address" in result) {
+          const cleaned = stripSensorCacheAddress(result);
+          IDBworkflow("Sensors", "sensorData", "readwrite", (writeStore) => {
+            writeStore.put(cleaned);
+          });
+          notifyDBChange("Sensors", "sensorData");
+          resolve(cleaned);
+          return;
+        }
+        resolve(result);
+      };
+      request.onerror = () => resolve(null);
+    });
+  });
+}
+
+function isFreshSensorIdbEntry(entry) {
+  if (!entry?.lastUpdated) return false;
+  return Date.now() - Number(entry.lastUpdated) < SENSOR_IDB_TTL;
+}
+
+/**
+ * Cached sensor meta from IndexedDB (owner, type).
+ * Avoids repeat API calls when logs were loaded in this session or recently.
+ */
+export async function getCachedSensorIdbMeta(sensorId) {
+  try {
+    const entry = await readSensorIdbEntry(sensorId);
+    if (!isFreshSensorIdbEntry(entry)) return null;
+    return {
+      owner: entry.owner ?? null,
+      type: entry.type ?? null,
+    };
+  } catch (error) {
+    console.error("Error getting cached sensor IDB meta:", error);
+    return null;
+  }
+}
 
 /**
  * Получает данные из кэша для указанных дней
@@ -341,44 +1303,24 @@ export function unsubscribeRealtime(unwatch) {
  */
 async function getCachedData(sensorId, dates) {
   try {
-    const now = Date.now();
-    const TTL = 24 * 60 * 60 * 1000; // 24 часа
-    const cachedData = { data: {}, address: null, lastUpdated: 0 };
+    const cachedData = { data: {}, owner: null, type: null, lastUpdated: 0 };
+    const sensorData = await readSensorIdbEntry(sensorId);
 
-    // Получаем данные сенсора из кэша
-    const sensorKey = sensorId;
+    if (sensorData && isFreshSensorIdbEntry(sensorData)) {
+      for (const date of dates) {
+        if (sensorData.data && sensorData.data[date]) {
+          cachedData.data[date] = sensorData.data[date];
+        }
+      }
+      cachedData.owner = sensorData.owner ?? null;
+      cachedData.type = sensorData.type ?? null;
+      cachedData.lastUpdated = Number(sensorData.lastUpdated || 0);
+    }
 
-    return new Promise((resolve) => {
-      IDBworkflow("Sensors", "sensorData", "readonly", (store) => {
-        const request = store.get(sensorKey);
-
-        request.onsuccess = () => {
-          const sensorData = request.result;
-
-          if (sensorData && now - sensorData.lastUpdated < TTL) {
-            // Фильтруем нужные даты из кэшированных данных
-            for (const date of dates) {
-              if (sensorData.data && sensorData.data[date]) {
-                cachedData.data[date] = sensorData.data[date];
-              }
-            }
-
-            // Сохраняем адрес из кэша
-            cachedData.address = sensorData.address || null;
-            cachedData.lastUpdated = Number(sensorData.lastUpdated || 0);
-          }
-
-          resolve(cachedData);
-        };
-
-        request.onerror = () => {
-          resolve(cachedData);
-        };
-      });
-    });
+    return cachedData;
   } catch (error) {
     console.error("Error getting cached data:", error);
-    return { data: {}, address: null, lastUpdated: 0 };
+    return { data: {}, owner: null, type: null, lastUpdated: 0 };
   }
 }
 
@@ -386,45 +1328,44 @@ async function getCachedData(sensorId, dates) {
  * Сохраняет данные в кэш
  * @param {string} sensorId - ID сенсора
  * @param {Object} dataByDate - объект с данными по дням
- * @param {string|null} address - адрес сенсора (опционально)
+ * @param {Object} meta - owner, type (optional)
  */
-async function saveToCache(sensorId, dataByDate, address = null) {
+async function saveToCache(sensorId, dataByDate, meta = {}) {
   try {
     const sensorKey = sensorId;
     const now = Date.now();
+    const { owner = null, type = null } = meta;
 
-    // Получаем существующие данные сенсора
     const existingData = await new Promise((resolve) => {
       IDBworkflow("Sensors", "sensorData", "readonly", (store) => {
         const request = store.get(sensorKey);
 
         request.onsuccess = () => {
-          resolve(request.result || { data: {}, address: null });
+          resolve(request.result || { data: {} });
         };
 
         request.onerror = () => {
-          resolve({ data: {}, address: null });
+          resolve({ data: {} });
         };
       });
     });
 
-    // Объединяем существующие данные с новыми
     const updatedData = {
       ...existingData.data,
       ...dataByDate,
     };
 
-    // Сохраняем адрес (новый или существующий)
-    const finalAddress = address || existingData.address;
+    const finalOwner = owner ?? existingData.owner ?? null;
+    const finalType = type ?? existingData.type ?? null;
 
-    // Создаем или обновляем запись сенсора
-    const cacheEntry = {
+    const cacheEntry = stripSensorCacheAddress({
       id: sensorKey,
       data: updatedData,
-      address: finalAddress,
+      owner: finalOwner,
+      type: finalType,
       lastUpdated: now,
-      ttl: 24 * 60 * 60 * 1000, // 24 часа
-    };
+      ttl: 24 * 60 * 60 * 1000,
+    });
 
     IDBworkflow("Sensors", "sensorData", "readwrite", (store) => {
       store.put(cacheEntry);
@@ -492,80 +1433,17 @@ export async function clearAllCache() {
 }
 
 /**
- * Получает кэшированный адрес сенсора
- * @param {string} sensorId - ID сенсора
- * @returns {Promise<string|null>} адрес сенсора или null
+ * @deprecated Addresses are stored per geo in the `addresses` IDB store. Use geoAddresses.js.
  */
-export async function getCachedAddress(sensorId) {
-  try {
-    const sensorKey = sensorId;
-
-    return new Promise((resolve) => {
-      IDBworkflow("Sensors", "sensorData", "readonly", (store) => {
-        const request = store.get(sensorKey);
-
-        request.onsuccess = () => {
-          const sensorData = request.result;
-          if (sensorData && sensorData.address) {
-            resolve(sensorData.address);
-          } else {
-            resolve(null);
-          }
-        };
-
-        request.onerror = () => {
-          resolve(null);
-        };
-      });
-    });
-  } catch (error) {
-    console.error("Error getting cached address:", error);
-    return null;
-  }
+export async function getCachedAddress() {
+  return null;
 }
 
 /**
- * Сохраняет адрес сенсора в кэш
- * @param {string} sensorId - ID сенсора
- * @param {string} address - адрес сенсора
+ * @deprecated Addresses are stored per geo in the `addresses` IDB store. Use geoAddresses.js.
  */
-export async function saveAddressToCache(sensorId, address) {
-  try {
-    const sensorKey = sensorId;
-
-    // Получаем существующие данные сенсора
-    const existingData = await new Promise((resolve) => {
-      IDBworkflow("Sensors", "sensorData", "readonly", (store) => {
-        const request = store.get(sensorKey);
-
-        request.onsuccess = () => {
-          resolve(request.result || { data: {}, address: null });
-        };
-
-        request.onerror = () => {
-          resolve({ data: {}, address: null });
-        };
-      });
-    });
-
-    // Обновляем только адрес, сохраняя существующие данные
-    const cacheEntry = {
-      id: sensorKey,
-      data: existingData.data || {},
-      address: address,
-      lastUpdated: Date.now(),
-      ttl: 24 * 60 * 60 * 1000, // 24 часа
-    };
-
-    IDBworkflow("Sensors", "sensorData", "readwrite", (store) => {
-      store.put(cacheEntry);
-    });
-
-    // Уведомляем об изменениях в кэше
-    notifyDBChange("Sensors", "sensorData");
-  } catch (error) {
-    console.error("Error saving address to cache:", error);
-  }
+export async function saveAddressToCache() {
+  return;
 }
 
 /**
@@ -647,7 +1525,8 @@ export async function getSensorDataWithCache(
   provider = "remote",
   onRealtimePoint = null,
   signal = null,
-  progressCallback = null
+  progressCallback = null,
+  cacheMeta = null
 ) {
   // Для realtime провайдера используем обычную логику
   if (provider === "realtime") {
@@ -662,10 +1541,13 @@ export async function getSensorDataWithCache(
     // Получаем список нужных дней
     const neededDays = getDaysBetween(startDate, endDate);
 
+    // NOTE: We intentionally use the per-day caching path (below) for week/month.
+    // It provides real progress updates (loadedDays/totalDays) and keeps the UI responsive
+    // even when v2 payloads are large for owners with many sensors.
+
     // Проверяем что есть в кэше (включая адрес)
     const cachedResult = await getCachedData(sensorId, neededDays);
     const cachedData = cachedResult.data;
-    const cachedAddress = cachedResult.address;
 
     // Определяем текущий день
     const today = new Date().toISOString().split("T")[0];
@@ -737,9 +1619,7 @@ export async function getSensorDataWithCache(
     if (missingDays.length > 0) {
       let loadedDays = cachedDays;
       for (const day of missingDays) {
-        const { start: dayStart, end: defaultDayEnd } = dayBoundsUnix(day);
-        // Для текущего дня используем текущее время как end, для прошедших дней - конец дня
-        const dayEnd = day === today ? Math.floor(Date.now() / 1000) : defaultDayEnd;
+        const { start: dayStart, end: dayEnd } = sensorFetchBoundsForDate(day);
 
         const dayData = await getSensorData(sensorId, dayStart, dayEnd, provider, null, signal);
         // Сохраняем только если это массив (успешно загружено, даже пустое)
@@ -758,7 +1638,10 @@ export async function getSensorDataWithCache(
       }
       // Сохраняем только успешно загруженные данные (массивы)
       if (Object.keys(newData).length > 0) {
-        await saveToCache(sensorId, newData, cachedAddress);
+        await saveToCache(sensorId, newData, {
+          owner: cacheMeta?.owner ?? null,
+          type: cacheMeta?.type ?? null,
+        });
       }
     }
 
@@ -801,8 +1684,9 @@ export async function getSensorDataWithCache(
       return null;
     }
 
-    // Добавляем адрес к результату для использования в компонентах
-    result._cachedAddress = cachedAddress;
+    // Добавляем метаданные из кэша для использования в компонентах
+    result._cachedOwner = cachedResult.owner ?? null;
+    result._cachedType = cachedResult.type ?? null;
     emitProgress({ status: "done", loadedDays: totalDays, missingDays: 0, totalDays, cachedDays });
 
     return result.sort((a, b) => a.timestamp - b.timestamp);

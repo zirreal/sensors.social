@@ -1,15 +1,17 @@
-import { converterPpmToMgm3 } from "./tools";
-
 export default {
   label: "NO2",
   name: {
     en: "Nitrogen Dioxide",
     ru: "Диоксид азота",
   },
-  unit: "mg/m3",
+  nameshort: {
+    en: "NO₂",
+    ru: "NO₂",
+  },
+  unit: "ppb",
   zones: [
     {
-      valueMax: 1,
+      valueMax: 53,
       color: "var(--measure-green)",
       label: {
         en: "Good",
@@ -17,24 +19,29 @@ export default {
       },
     },
     {
-      valueMax: 5,
-      color: "var(--measure-yellow)",
+      valueMax: 100,
+      color: "var(--measure-bluegreen)",
       label: {
-        en: "Satisfyingly",
-        ru: "Удовлетворительно",
+        en: "Moderate",
+        ru: "Умеренно",
       },
     },
     {
+      valueMax: 360,
       color: "#fc0202",
       label: {
-        en: "Poor",
-        ru: "Плохо",
+        en: "Unhealthy",
+        ru: "Вредно",
+      },
+    },
+    {
+      color: "#7a00da",
+      label: {
+        en: "Very unhealthy",
+        ru: "Очень вредно",
       },
     },
   ],
-  calculate: function (v) {
-    return converterPpmToMgm3(v, 46.01);
-  },
   description:
-    "Nitrogen oxide. Poisonous red-brown gas with a sharp unpleasant odor or yellowish liquid. The source is the combustion of various types of fuel. NO2 in the atmosphere can cause acid rain and irritation of mucous membranes. The maximum single concentration is 0.085 mg/m3, the average daily concentration is 0.4 mg/m3.",
+    "Nitrogen dioxide (NO₂) is a harmful gas produced mainly by fuel combustion (traffic, heating). It irritates airways and can worsen asthma. This sensor reports NO₂ in parts per billion (ppb).",
 };
