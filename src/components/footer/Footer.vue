@@ -165,6 +165,7 @@ import { sortMapLayerUnits } from "../../measurements/tools";
 import {
   listMeasurementsOnMap,
   collectUnitsFromMapSensors,
+  sensorFetchBoundsForDate,
 } from "../../utils/map/sensors/requests";
 import ProviderType from "../ProviderType.vue";
 // import { setMapSettings, getPriorityValue } from "../../utils/utils"; // Перенесено в useMap
@@ -299,7 +300,8 @@ const loadAvailableUnits = async () => {
     if (realtime.value) {
       units = collectUnitsFromMapSensors(sensorsUI.sensors);
     } else {
-      units = await listMeasurementsOnMap(start.value, Number(endTimestamp.value));
+      const { end } = sensorFetchBoundsForDate(start.value);
+      units = await listMeasurementsOnMap(start.value, end);
     }
     availableUnits.value = sortMapLayerUnits(units.length > 0 ? units : ["pm10"]);
     ensureValidUnitSelection(availableUnits.value);
@@ -307,10 +309,6 @@ const loadAvailableUnits = async () => {
     console.error("Failed to load available measurements:", e);
   }
 };
-
-// вычисления для истории
-const startTimestamp = computed(() => String(dayBoundsUnix(start.value).start));
-const endTimestamp = computed(() => String(dayBoundsUnix(start.value).end));
 
 // type теперь computed, поэтому watcher не нужен
 

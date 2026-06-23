@@ -264,6 +264,12 @@ const MAP_MARKERS_DATA_STORE = "mapMarkersData";
 
 /** In-memory slice of the latest maxdata payload (per unit) for sibling lookups. */
 const maxDataApiCache = new Map();
+/** Coalesce parallel ensureMaxDataRecord fetches for the same unit/day/end. */
+const maxDataInflight = new Map();
+
+function maxDataInflightKey(unit, isoDate, end) {
+  return `${unit}:${isoDate}:${end}`;
+}
 
 function mapMarkersDataId(unit, isoDate) {
   return `${String(unit || "").toLowerCase()}:${isoDate}`;
@@ -533,21 +539,36 @@ export async function ensureMaxDataRecord(unit, isoDate = dayISO(), requestedEnd
     };
   }
 
-  const values = (await REMOTE_PROVIDER.maxValuesForPeriod(fetchStart, fetchEnd, u)) || {};
-  const record = {
-    id: mapMarkersDataId(u, isoDate),
-    unit: u,
-    isoDate,
-    start: fetchStart,
-    end: fetchEnd,
-    values,
-    lastUpdated: Date.now(),
-  };
+  const inflightKey = maxDataInflightKey(u, isoDate, fetchEnd);
+  const inflight = maxDataInflight.get(inflightKey);
+  if (inflight) {
+    return inflight;
+  }
 
-  await writeMapMarkersDataToIdb(record);
-  rememberMaxDataInMemory(u, isoDate, fetchStart, fetchEnd, values);
+  const fetchPromise = (async () => {
+    const values = (await REMOTE_PROVIDER.maxValuesForPeriod(fetchStart, fetchEnd, u)) || {};
+    const record = {
+      id: mapMarkersDataId(u, isoDate),
+      unit: u,
+      isoDate,
+      start: fetchStart,
+      end: fetchEnd,
+      values,
+      lastUpdated: Date.now(),
+    };
 
-  return { values, start: fetchStart, end: fetchEnd, source: "network" };
+    await writeMapMarkersDataToIdb(record);
+    rememberMaxDataInMemory(u, isoDate, fetchStart, fetchEnd, values);
+
+    return { values, start: fetchStart, end: fetchEnd, source: "network" };
+  })();
+
+  maxDataInflight.set(inflightKey, fetchPromise);
+  try {
+    return await fetchPromise;
+  } finally {
+    maxDataInflight.delete(inflightKey);
+  }
 }
 
 /** At least one maxdata row is placed on the map (not 0,0). */

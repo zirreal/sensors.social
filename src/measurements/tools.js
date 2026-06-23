@@ -1,7 +1,24 @@
 import measurements from "./index";
 
-/** Not offered as a map colour layer (computed in popup or legacy). */
-const MAP_LAYER_EXCLUDE = new Set(["aqi", "noise"]);
+/** Not offered as a map colour layer (computed in popup, legacy, or unused on map). */
+const MAP_LAYER_EXCLUDE = new Set([
+  "aqi",
+  "noise",
+  "airtemp",
+  "airtempavg",
+  "airtempmax",
+  "airtempmin",
+  "no2",
+  "o3",
+  "pm1",
+  "rainfall",
+  "sat10",
+  "sat5",
+  "soiltemp",
+  "windang",
+  "windspeed",
+  "windspeedmax",
+]);
 
 /** All measurement ids that can be a map layer — keys from `measurements/`, one place. */
 export function mapLayerUnitIds() {
