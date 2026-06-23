@@ -85,6 +85,20 @@ export function getPeriodBounds(isoDate, mode = "day") {
 }
 
 /**
+ * API fetch window by timeline mode: day/realtime use live end for today; week/month rolling period.
+ */
+export function timelineFetchBounds(isoDate, timelineMode = "day") {
+  if (timelineMode === "day" || timelineMode === "realtime") {
+    const bounds = dayBoundsUnix(isoDate);
+    if (isoDate === dayISO()) {
+      return { start: bounds.start, end: Math.floor(Date.now() / 1000) };
+    }
+    return bounds;
+  }
+  return getPeriodBounds(isoDate, timelineMode);
+}
+
+/**
  * Список календарных дат YYYY-MM-DD в периоде (локальные границы как у getPeriodBounds).
  * Для realtime возвращает один день по выбранной дате (как day).
  */

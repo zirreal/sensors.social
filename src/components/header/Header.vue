@@ -192,7 +192,7 @@ const locales = languages || ["en"];
 const mapState = useMap();
 const { idbBookmarks } = useBookmarks();
 const localeComputed = computed(() => locale.value || "en");
-const sensorsData = reactive(useSensors(localeComputed));
+const sensorsData = reactive(useSensors());
 
 /**
  * Фильтрует сенсоры согласно конфигурации excluded_sensors

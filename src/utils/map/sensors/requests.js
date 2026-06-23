@@ -2,7 +2,7 @@ import Provider from "@/providers/remote";
 import Libp2pProvider from "@/providers/libp2p";
 import { getConfigBounds, filterByBounds } from "../map";
 import { hasValidCoordinates, fetchJson } from "../../utils";
-import { dayISO, dayBoundsUnix } from "../../date";
+import { dayISO, dayBoundsUnix, timelineFetchBounds } from "../../date";
 import { mapLayerUnitIds, sortMapLayerUnits } from "../../../measurements/tools";
 import { settings, excluded_sensors } from "@config";
 
@@ -22,11 +22,7 @@ const SENSOR_V2_RECENT_MS = 60_000;
  * Day fetch bounds aligned with getSensorDataWithCache: for today end = now, not end-of-day.
  */
 export function sensorFetchBoundsForDate(isoDate) {
-  const bounds = dayBoundsUnix(isoDate);
-  if (isoDate === dayISO()) {
-    return { start: bounds.start, end: Math.floor(Date.now() / 1000) };
-  }
-  return bounds;
+  return timelineFetchBounds(isoDate, "day");
 }
 
 async function fetchSensorV2Payload(sensorId, startTimestamp, endTimestamp, signal = null) {

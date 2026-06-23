@@ -183,7 +183,7 @@ const { t } = useI18n();
 const mapState = useMap();
 const accountStore = useAccounts();
 const localeComputed = computed(() => localStorage.getItem("locale") || "en");
-const { logsProgress, runLogsHealth } = useSensors(localeComputed);
+const { logsProgress, runLogsHealth } = useSensors();
 const { logsHealth, logsHealthMeta } = useLogsHealth();
 const logGeoAddresses = inject(LOG_GEO_ADDRESSES_KEY, null);
 const chartGeoAddresses = computed(() => logGeoAddresses?.geoAddresses?.value || {});

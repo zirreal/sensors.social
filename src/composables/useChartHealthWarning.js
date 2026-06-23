@@ -59,7 +59,7 @@ function unhealthyMetricLabelsForCategory(healthCat, checksSource, logArr, local
 export function useChartHealthWarning(sources) {
   const { locale } = useI18n();
   const mapState = useMap();
-  const { runLogsHealth } = useSensors(locale);
+  const { runLogsHealth } = useSensors();
   const { logsHealth, logsHealthMeta } = useLogsHealth();
 
   const reloadContext = () => ({

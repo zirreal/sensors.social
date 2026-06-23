@@ -218,7 +218,7 @@ const { t, locale } = useI18n();
 const mapState = useMap();
 
 const localeComputed = computed(() => localStorage.getItem("locale") || locale.value || "en");
-const sensorsUI = useSensors(localeComputed);
+const sensorsUI = useSensors();
 
 const point = computed(() => props.point?.value ?? props.point ?? null);
 

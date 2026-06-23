@@ -234,7 +234,7 @@ const localeComputed = computed(() => {
   return i18nLocale.value || localStorage.getItem("locale") || "en";
 });
 const messagesUI = reactive(useMessages(localeComputed));
-const sensorsUI = reactive(useSensors(localeComputed));
+const sensorsUI = reactive(useSensors());
 
 // выбор измерения
 const type = computed({

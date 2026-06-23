@@ -73,7 +73,7 @@ const mapRef = ref(null);
 
 const localeComputed = computed(() => localStorage.getItem("locale") || locale.value || "en");
 
-const sensorsUI = useSensors(localeComputed);
+const sensorsUI = useSensors();
 const {
   isSensor,
   sensorPoint,
