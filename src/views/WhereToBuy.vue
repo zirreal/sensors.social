@@ -6,12 +6,11 @@
   />
   <PageTextLayout>
     <div class="pagetext-header">
-      <div class="pagetext-eyebrow">sensors.social</div>
-      <h1 class="pagetext-title">{{ $t("Where to buy air monitor Altruist") }}</h1>
+      <h1 class="pagetext-title">{{ $t("Where to buy") }}</h1>
       <p class="pagetext-subtitle">
         {{
           $t(
-            "Two-module environment monitoring kit for indoors and outdoors — for those who care about health. You track your pulse, HRV, sleep phases. To achieve the best recovery results — you need to account for sleep conditions and the environment you live in."
+            "Buy ready-to-use air quality monitors for indoor and outdoor use. Measure dust, noise, and CO₂, and choose what to share with the sensors.social community."
           )
         }}
       </p>
@@ -21,7 +20,7 @@
       <a
         v-for="shop in shops"
         :key="shop.id"
-        class="shop ui-surface ui-surface--lift"
+        class="shop ui-surface"
         :class="{ 'shop--disabled': shop.comingSoon }"
         :data-tone="shop.tone"
         :href="shop.href || undefined"
@@ -41,9 +40,7 @@
           <img :src="shop.logo" :alt="shop.logoAlt" loading="lazy" />
         </div>
 
-        <div class="shop__body">
-          <p class="shop__desc">{{ shop.description }}</p>
-        </div>
+        <p class="shop__desc">{{ shop.description }}</p>
       </a>
     </section>
   </PageTextLayout>
@@ -72,7 +69,18 @@ const shops = computed(() => [
     logo: cyberpunksShopLogo,
     logoAlt: t("Cyberpunks Shop"),
     title: t("Cyberpunks Shop"),
-    description: t("Our online-shop with various options available. Worldwide delivery."),
+    description: t("Our online-shop with various options available"),
+  },
+  {
+    id: "europe",
+    regionLabel: t("DE"),
+    comingSoon: false,
+    tone: "primary",
+    href: "https://www.amazon.de/-/en/Assistant-Integration-sensors-social-Community-Owned-Subscriptions/dp/B0GXF3Q127/ref=sr_1_1?crid=3VPHQPHQZ9RU4&dib=eyJ2IjoiMSJ9.SMCp3qkyJXH6cQoVFrFeGWx7vzIJfauoYLSEgwZRJmO_VQJorYjKGeYJJwPAqELySrntJuhU3BJN3qO_4A3JrGk-SWw0Po0aPuhLFP-yoi5l5THWvGHcant_PcVbPuijz4VTLEPATGKt-1Lu3dR69Qvv4x7r1V7Az9LgMqlHK_Cpo8-EFtz3VMEAwoTv09TQf92TNjo07B7yu5W1bmD0IK7osB4yZ90jKueqPmsnwyp0BPOvDcpQeTsz6G7EVXc2XbmJOHQLHhdu75ueFWrpGkA6XyGqE1xadoFcUaX8Qyk.wbDqcVCSrL4aOo3wFK1Q69X86FBDExjxkCkjvzDKg9U",
+    logo: amazonLogo,
+    logoAlt: "Amazon",
+    title: "Amazon",
+    description: t("Amazon DE: Altruist Urban, German delivery"),
   },
   {
     id: "cyprus",
@@ -83,29 +91,18 @@ const shops = computed(() => [
     logo: pinoutLogo,
     logoAlt: "Pinout",
     title: "Pinout",
-    description: t("Altruist Air Quality Sensors with Installation & Setup in Cyprus"),
+    description: t("Altruist air quality sensors with installation and setup in Cyprus"),
   },
   {
     id: "ru_cis",
-    regionLabel: t("EAEU"),
+    regionLabel: t("CIS"),
     comingSoon: false,
     tone: "primary",
     href: "https://market.yandex.ru/search?generalContext=t%3Dmerchant%3Bi%3D1%3Bmrch%3D216593109%3B&rs=eJwzEvjEyMvBKLDwEKsEg0bTnOfsACoUBRA%2C&merchant-filter=216593109",
     logo: yandexLogo,
     logoAlt: t("Yandex Market"),
     title: t("Yandex Market"),
-    description: t("Various options of buying Altruist: Urban only, Urban & Insight, etc."),
-  },
-  {
-    id: "europe",
-    regionLabel: t("Europe"),
-    comingSoon: true,
-    tone: "neutral",
-    href: null,
-    logo: amazonLogo,
-    logoAlt: "Amazon",
-    title: "Amazon",
-    description: t("Amazon DE with delivery all over Europe."),
+    description: t("Various Altruist options in CIS countries from a local supplier"),
   },
 ]);
 </script>
@@ -119,42 +116,40 @@ const shops = computed(() => [
   margin-top: calc(var(--gap) * 1.2);
 }
 
+@supports (grid-template-rows: subgrid) {
+  .shops {
+    grid-template-rows: repeat(2, auto minmax(88px, auto) auto);
+  }
+}
+
 .shop {
   --shop-accent: var(--color-link);
   --ui-surface-border: color-mix(in srgb, var(--shop-accent), transparent 55%);
-  --ui-surface-border-hover: color-mix(in srgb, var(--shop-accent), transparent 15%);
   --ui-surface-bg: color-mix(in srgb, var(--app-bodybg), transparent 6%);
-  --ui-surface-bg-hover: color-mix(in srgb, var(--ui-surface-bg), transparent 0%);
   --ui-surface-shadow: 0 10px 30px rgba(0, 0, 0, 0.06);
-  --ui-surface-shadow-hover: 0 18px 44px rgba(0, 0, 0, 0.12);
 
   display: grid;
-  grid-template-rows: auto 1fr auto;
-  gap: calc(var(--gap) * 0.7);
+  grid-template-rows: auto minmax(88px, auto) auto;
+  gap: calc(var(--gap) * 0.65);
   padding: calc(var(--gap) * 1.1);
   text-decoration: none;
   color: inherit;
-  min-height: 280px;
-  position: relative;
-  overflow: hidden;
+  min-height: 0;
 }
 
-/* If supported, align internal rows across all cards */
 @supports (grid-template-rows: subgrid) {
-  .shops {
-    /* header / logo / body rows shared across items */
-    grid-template-rows: auto minmax(140px, 1fr) auto;
-  }
-
   .shop {
     grid-template-rows: subgrid;
     grid-row: span 3;
-    min-height: 0;
   }
 }
 
-.shop:hover,
-.shop:focus-visible {
+.shop.ui-surface:hover,
+.shop.ui-surface:focus-visible {
+  background: var(--ui-surface-bg);
+  border-color: var(--ui-surface-border);
+  box-shadow: var(--ui-surface-shadow);
+  transform: none;
   text-decoration: none;
 }
 
@@ -163,57 +158,11 @@ const shops = computed(() => [
   --ui-surface-border: color-mix(in srgb, var(--app-textcolor), transparent 72%);
   --ui-surface-bg: color-mix(in srgb, var(--app-bodybg), transparent 2%);
   --ui-surface-shadow: 0 10px 26px rgba(0, 0, 0, 0.05);
-  --ui-surface-shadow-hover: 0 18px 40px rgba(0, 0, 0, 0.11);
-}
-
-.shop::before {
-  content: "";
-  position: absolute;
-  inset: -2px;
-  pointer-events: none;
-  opacity: 0;
-  transition: opacity 200ms ease;
-  background: radial-gradient(
-      700px 240px at 15% 0%,
-      color-mix(in srgb, var(--shop-accent), transparent 72%),
-      transparent 60%
-    ),
-    linear-gradient(
-      120deg,
-      color-mix(in srgb, var(--shop-accent), transparent 75%),
-      transparent 65%
-    );
-}
-
-.shop:hover::before,
-.shop:focus-visible::before {
-  opacity: 1;
-}
-
-.shop:focus-visible {
-  box-shadow: var(--ui-surface-shadow-hover),
-    0 0 0 3px color-mix(in srgb, var(--shop-accent), transparent 75%);
-}
-
-.shop:hover .shop__logo img,
-.shop:focus-visible .shop__logo img {
-  filter: saturate(1.05) contrast(1.02);
 }
 
 .shop--disabled {
   cursor: default;
   opacity: 0.85;
-}
-
-.shop--disabled:hover,
-.shop--disabled:focus-visible {
-  transform: none;
-  box-shadow: var(--ui-surface-shadow);
-}
-
-.shop--disabled:hover::before,
-.shop--disabled:focus-visible::before {
-  opacity: 0;
 }
 
 .shop__header {
@@ -247,13 +196,13 @@ const shops = computed(() => [
 .shop__logo {
   display: grid;
   place-items: center;
-  padding: calc(var(--gap) * 0.5);
-  min-height: 140px;
+  align-self: stretch;
+  width: 100%;
 }
 
 .shop__logo img {
   max-width: min(340px, 100%);
-  max-height: 90px;
+  max-height: 80px;
   width: auto;
   height: auto;
   object-fit: contain;
@@ -261,17 +210,11 @@ const shops = computed(() => [
   margin: 0;
 }
 
-.shop__body {
-  display: grid;
-  grid-template-rows: auto 1fr;
-  gap: calc(var(--gap) * 0.35);
-  text-align: center;
-  justify-items: center;
-}
-
 .shop__desc {
   margin: 0;
   max-width: 46ch;
+  justify-self: center;
+  text-align: center;
   color: var(--color-blue);
   font-size: calc(var(--font-size) * 0.95);
   font-weight: 600;
@@ -287,8 +230,10 @@ const shops = computed(() => [
     grid-template-columns: 1fr;
   }
 
-  .shop {
-    min-height: 0;
+  @supports (grid-template-rows: subgrid) {
+    .shops {
+      grid-template-rows: repeat(4, auto minmax(88px, auto) auto);
+    }
   }
 
   .shop__logo img {

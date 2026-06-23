@@ -344,6 +344,10 @@ input:disabled {
   --app-buttontextcolor: var(--color-link);
 }
 
+.button-round-outline-brightgreen {
+  background-color: var(--color-green-bright);
+}
+
 /* .button-round-outline:hover {
   box-shadow: 0 2px 6px rgba(0, 0, 0, 0.15);
   transform: translateY(-2px);

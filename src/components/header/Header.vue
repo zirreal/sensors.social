@@ -38,13 +38,11 @@
 
       <div class="flexline header-actions">
         <a
-          href="https://x.com/sensorssocial"
-          target="_blank"
-          rel="noopener"
-          class="button button-outlined narrow-hide"
+          href="/where-to-buy/"
+          class="button button-outlined narrow-hide button-round-outline-brightgreen"
         >
-          <font-awesome-icon icon="fa-brands fa-x-twitter" aria-hidden="true" />
-          <span>{{ $t("Latest updates") }}</span>
+          <font-awesome-icon icon="fa-solid fa-bag-shopping" aria-hidden="true" />
+          <span>{{ $t("Shop sensors") }}</span>
         </a>
 
         <button class="popovercontrol button-round-outline" popovertarget="about">

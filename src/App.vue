@@ -1,5 +1,5 @@
 <template>
-  <div class="maintenance-banner">
+  <!-- <div class="maintenance-banner">
     <a
       href="https://cyberpunks.shop/"
       target="_blank"
@@ -9,7 +9,7 @@
       <span>Buy a map-ready air quality sensor <i>[Track your local environment]</i></span>
       <font-awesome-icon icon="fa-solid fa-arrow-right" class="maintenance-banner-arrow" aria-hidden="true" />
     </a>
-  </div>
+  </div> -->
   <RouterView />
   <notifications :classes="['notify', 'vue-notification']" />
 </template>
@@ -130,7 +130,7 @@ onMounted(async () => {
   font-weight: bold;
 }
 
-.maintenance-banner {
+/* .maintenance-banner {
   position: sticky;
   top: 0;
   z-index: 100;
@@ -156,16 +156,8 @@ onMounted(async () => {
 }
 
 .maintenance-banner-link:hover {
-  /* opacity: 0.9;
-  text-decoration: underline; */
   color: var(--color-light);
 }
-
-/* .maintenance-banner-img-centered {
-  display: block;
-  max-width: 40px;
-  margin: 0 auto 10px;
-} */
 
 .maintenance-banner i {
   font-weight: 400;
@@ -183,5 +175,5 @@ onMounted(async () => {
   .maintenance-banner i {
     display: block;
   }
-}
+} */
 </style>
