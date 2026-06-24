@@ -245,7 +245,6 @@ watch(
 
 // Генерируем ссылку на основе выбранных параметров
 const generatedLink = computed(() => {
-  const baseUrl = window.location.origin + route.path;
   const queryParams = new URLSearchParams();
 
   // Add owner only if we actually have it (legacy sensors keep old URL)
@@ -276,6 +275,9 @@ const generatedLink = computed(() => {
   }
 
   const queryString = queryParams.toString();
+  const shareBase = String(settings?.SHARE_URL || "").replace(/\/$/, "");
+  const useShareBase = Boolean(shareBase && includeSensor.value && sensorId);
+  const baseUrl = useShareBase ? shareBase : window.location.origin + route.path;
   return queryString ? `${baseUrl}?${queryString}` : baseUrl;
 });
 

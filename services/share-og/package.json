@@ -1,0 +1,8 @@
+{
+  "name": "sensors-social-share-og",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "start": "node server.mjs"
+  }
+}

@@ -1,12 +1,15 @@
 import { ref } from "vue";
 import { settings } from "@config";
 import { dayISO } from "@/utils/date";
+import { getDefaultMapView } from "@/utils/map/defaultView";
+
+const initialMapView = getDefaultMapView();
 
 // Глобальное состояние карты (разделяется между всеми экземплярами composable)
 const mapposition = ref({
-  zoom: settings?.MAP.zoom || "4",
-  lat: settings?.MAP.position.lat || "0",
-  lng: settings?.MAP.position.lng || "0",
+  zoom: initialMapView.zoom,
+  lat: initialMapView.lat,
+  lng: initialMapView.lng,
 });
 
 const mapinactive = ref(false);

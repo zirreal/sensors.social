@@ -28,6 +28,7 @@ import { init as initMessages } from "../utils/map/messages";
 import { destroyWindLayer } from "../utils/map/wind";
 import { useMap } from "@/composables/useMap";
 import { useBookmarks } from "@/composables/useBookmarks";
+import { getDefaultMapView } from "@/utils/map/defaultView";
 
 // Props and emits
 const props = defineProps({
@@ -114,14 +115,8 @@ const opengeotip = (msg) => {
 
 // Загружает позицию карты из localStorage или использует настройки по умолчанию
 const getlocalmappos = () => {
-  const hasStoredPosition = !!localStorage.getItem("map-position");
-  const lastsettings =
-    localStorage.getItem("map-position") ||
-    JSON.stringify({
-      lat: settings.MAP.position.lat,
-      lng: settings.MAP.position.lng,
-      zoom: settings.MAP.zoom,
-    });
+  const stored = localStorage.getItem("map-position");
+  const lastsettings = stored || JSON.stringify(getDefaultMapView());
 
   const { lat, lng, zoom } = JSON.parse(lastsettings);
   mapState.setMapSettings(route, router, { lat, lng, zoom });
@@ -129,13 +124,13 @@ const getlocalmappos = () => {
 
 // Проверяет, есть ли координаты в URL
 const checkPosFromURI = () => {
-  return !!(route.query.lat || route.query.lng || route.query.zoom);
+  return !!(route.query.lat && route.query.lng && route.query.zoom);
 };
 
 // Загружает позицию карты из URL параметров
 const setPosFromURI = () => {
-  const lat = route.query.lat || settings.MAP.position.lat;
-  const lng = route.query.lng || settings.MAP.position.lng;
+  const lat = route.query.lat;
+  const lng = route.query.lng;
   const zoom = route.query.zoom || settings.MAP.zoom;
 
   // Guard against corrupted URL params (e.g. sensor_id accidentally written into lat)
@@ -150,13 +145,10 @@ const setPosFromURI = () => {
   mapState.setMapSettings(route, router, { lat: nLat, lng: nLng, zoom: nZoom });
 };
 
-// Устанавливает позицию карты по умолчанию из настроек
+// Устанавливает позицию карты по умолчанию (глобальный обзор, без регионального центра)
 const setPosDefault = () => {
-  mapState.setMapSettings(route, router, {
-    lat: settings.MAP.position.lat,
-    lng: settings.MAP.position.lng,
-    zoom: settings.MAP.zoom,
-  });
+  const { lat, lng, zoom } = getDefaultMapView();
+  mapState.setMapSettings(route, router, { lat, lng, zoom });
 };
 
 // Инициализирует позицию карты: URL → localStorage → настройки по умолчанию

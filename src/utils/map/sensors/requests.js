@@ -262,6 +262,8 @@ const MAP_MARKERS_DATA_STORE = "mapMarkersData";
 const maxDataApiCache = new Map();
 /** Coalesce parallel ensureMaxDataRecord fetches for the same unit/day/end. */
 const maxDataInflight = new Map();
+/** Shared TTL for remote day slices (maxdata, markers list, sensor log IDB). */
+const REMOTE_DAY_REFRESH_MS = 5 * 60 * 1000;
 
 function maxDataInflightKey(unit, isoDate, end) {
   return `${unit}:${isoDate}:${end}`;
@@ -440,6 +442,11 @@ function isPastDayCompleteInIdb(record, dayBounds) {
   return Number(record.start) <= dayBounds.start && Number(record.end) >= dayBounds.end;
 }
 
+function isFreshMapMarkersRecord(record) {
+  if (!record?.lastUpdated) return false;
+  return Date.now() - Number(record.lastUpdated) < REMOTE_DAY_REFRESH_MS;
+}
+
 async function readMapMarkersDataFromIdb(unit, isoDate) {
   try {
     return await IDBgetByKey(SENSORS_IDB_DB, MAP_MARKERS_DATA_STORE, mapMarkersDataId(unit, isoDate));
@@ -513,6 +520,15 @@ export async function ensureMaxDataRecord(unit, isoDate = dayISO(), requestedEnd
       source: "idb",
     };
   } else if (Number(idbRecord.end) >= end) {
+    rememberMaxDataInMemory(u, isoDate, idbRecord.start, idbRecord.end, idbRecord.values);
+    return {
+      values: idbRecord.values,
+      start: idbRecord.start,
+      end: idbRecord.end,
+      source: "idb",
+    };
+  } else if (isToday && isFreshMapMarkersRecord(idbRecord)) {
+    // Today: `end` tracks now() and drifts every second — reuse IDB for REMOTE_DAY_REFRESH_MS.
     rememberMaxDataInMemory(u, isoDate, idbRecord.start, idbRecord.end, idbRecord.values);
     return {
       values: idbRecord.values,
@@ -669,71 +685,110 @@ export async function getMaxData(start, end, unit, sensors, isoDate = dayISO()) 
   return applyMaxValuesToSensors(sensors, unit, values);
 }
 
+function markersListCacheId(isoDate, timelineMode = "day") {
+  return `markers:${timelineMode || "day"}:${isoDate}`;
+}
+
 /**
- * Получает сенсоры с данными для карты
- * @param {number} start - начальный timestamp
- * @param {number} end - конечный timestamp
- * @param {string} provider - тип провайдера ('remote' или 'realtime')
- * @returns {Object} объект с sensors (с валидными координатами) и sensorsNoLocation (с нулевыми координатами)
+ * `api/v2/sensor/markers/{start}/{end}` with IDB cache in mapMarkersData.
+ * Past days: reuse when cached start/end covers the request.
+ * Today: also reuse within REMOTE_DAY_REFRESH_MS while `end` drifts with now().
  */
-export async function getSensors(start, end, provider = "remote") {
-  if (provider === "realtime") {
-    // Для realtime провайдера сенсоры приходят через WebSocket
-    // и обрабатываются в Main.vue через handlerNewPoint
-    // Здесь возвращаем пустые массивы, так как данные уже есть в composable
-    return { sensors: [], sensorsNoLocation: [] };
-  } else {
-    // Для remote получаем базовые данные сенсоров
-    const historyData = await REMOTE_PROVIDER.getSensorsForPeriod(start, end);
+async function loadMarkersListRaw(start, end, isoDate, timelineMode = "day") {
+  const reqStart = Number(start);
+  const reqEnd = Number(end);
+  const isToday = isoDate === dayISO();
+  const cacheId = markersListCacheId(isoDate, timelineMode);
 
-    // Обрабатываем данные прямо здесь
-    const sensors = [];
-    const sensorsNoLocation = [];
-
-    // Новый API возвращает массив сенсоров
-    if (!Array.isArray(historyData)) return { sensors, sensorsNoLocation };
-
-    for (const sensorData of historyData) {
-      if (!sensorData || !sensorData.sensor_id || !sensorData.geo) continue;
-
-      // Проверяем валидность координат
-      const lat = parseFloat(sensorData.geo.lat);
-      const lng = parseFloat(sensorData.geo.lng);
-
-      const sensorInfo = {
-        sensor_id: sensorData.sensor_id,
-        model: sensorData.model || 2,
-        geo: { lat, lng },
-        address: sensorData.address || null,
-        donated_by: sensorData.donated_by || null,
-        owner: String(sensorData.owner || "").trim() || null,
-        device_model: sensorData.device_model || null,
-        timestamp: sensorData.timestamp || null,
-        sensors:
-          Array.isArray(sensorData.sensors) && sensorData.sensors.length > 0
-            ? sensorData.sensors
-            : null,
-      };
-
-      if (!hasValidCoordinates({ lat, lng })) {
-        // Сенсоры с нулевыми координатами
-        sensorsNoLocation.push(sensorInfo);
-      } else {
-        // Сенсоры с валидными координатами
-        sensors.push(sensorInfo);
-      }
-    }
-
-    // Применяем фильтрацию по excluded_sensors конфигу
-    const filteredSensors = filterSensorsByConfig(sensors);
-    const filteredSensorsNoLocation = filterSensorsByConfig(sensorsNoLocation);
-
-    const bounds = getConfigBounds(settings);
-    return {
-      sensors: filterByBounds(filteredSensors, bounds),
-      sensorsNoLocation: filterByBounds(filteredSensorsNoLocation, bounds),
-    };
+  let cached = null;
+  try {
+    cached = await IDBgetByKey(SENSORS_IDB_DB, MAP_MARKERS_DATA_STORE, cacheId);
+  } catch {
+    // IDB unavailable — fall through to network.
   }
+
+  if (Array.isArray(cached?.sensors)) {
+    const coversWindow =
+      Number(cached.start) <= reqStart && Number(cached.end) >= reqEnd;
+    if (coversWindow || (isToday && isFreshMapMarkersRecord(cached))) {
+      return cached.sensors;
+    }
+  }
+
+  const sensors = (await REMOTE_PROVIDER.getSensorsForPeriod(reqStart, reqEnd)) || [];
+  await writeMapMarkersDataToIdb({
+    id: cacheId,
+    isoDate,
+    timelineMode,
+    start: reqStart,
+    end: reqEnd,
+    sensors,
+    lastUpdated: Date.now(),
+  });
+  return sensors;
+}
+
+/**
+ * Map sensors for marker layer (remote: markers API + bounds filter).
+ * @param {number} start - start unix timestamp
+ * @param {number} end - end unix timestamp
+ * @param {string} provider - 'remote' | 'realtime'
+ * @param {Object} [cacheContext]
+ * @param {string} [cacheContext.isoDate] - selected map date (enables IDB cache)
+ * @param {string} [cacheContext.timelineMode] - day | week | month | realtime
+ * @returns {{ sensors: Array, sensorsNoLocation: Array }}
+ */
+export async function getSensors(start, end, provider = "remote", cacheContext = null) {
+  if (provider === "realtime") {
+    // Realtime sensors arrive via WebSocket in Main.vue — nothing to fetch here.
+    return { sensors: [], sensorsNoLocation: [] };
+  }
+
+  const historyData = cacheContext?.isoDate
+    ? await loadMarkersListRaw(start, end, cacheContext.isoDate, cacheContext.timelineMode)
+    : await REMOTE_PROVIDER.getSensorsForPeriod(start, end);
+
+  const sensors = [];
+  const sensorsNoLocation = [];
+
+  if (!Array.isArray(historyData)) return { sensors, sensorsNoLocation };
+
+  for (const sensorData of historyData) {
+    if (!sensorData || !sensorData.sensor_id || !sensorData.geo) continue;
+
+    const lat = parseFloat(sensorData.geo.lat);
+    const lng = parseFloat(sensorData.geo.lng);
+
+    const sensorInfo = {
+      sensor_id: sensorData.sensor_id,
+      model: sensorData.model || 2,
+      geo: { lat, lng },
+      address: sensorData.address || null,
+      donated_by: sensorData.donated_by || null,
+      owner: String(sensorData.owner || "").trim() || null,
+      device_model: sensorData.device_model || null,
+      timestamp: sensorData.timestamp || null,
+      sensors:
+        Array.isArray(sensorData.sensors) && sensorData.sensors.length > 0
+          ? sensorData.sensors
+          : null,
+    };
+
+    if (!hasValidCoordinates({ lat, lng })) {
+      sensorsNoLocation.push(sensorInfo);
+    } else {
+      sensors.push(sensorInfo);
+    }
+  }
+
+  const filteredSensors = filterSensorsByConfig(sensors);
+  const filteredSensorsNoLocation = filterSensorsByConfig(sensorsNoLocation);
+
+  const bounds = getConfigBounds(settings);
+  return {
+    sensors: filterByBounds(filteredSensors, bounds),
+    sensorsNoLocation: filterByBounds(filteredSensorsNoLocation, bounds),
+  };
 }
 
 /**
@@ -767,7 +822,6 @@ function filterSensorsByConfig(sensors) {
 // on map load. Fallback chain:
 //   1) v2 sensor payload for today (owner often only in recent aggregates)
 //   2) v2 sensor payload for the requested day
-//   3) legacy v1 `api/sensor/{id}/{msStart}/{msEnd}` — 1h window (old sensors.social)
 //
 // Markers before ROSEMAN_MARKER_ICONS_FROM_ISO lack reliable device/owner meta — hide
 // device-type icons on the map until that day (colored circles only).
@@ -824,23 +878,6 @@ async function resolveRosemanOwnerWorkaround(sensorId, startTimestamp, endTimest
     }
   }
 
-  if (!owner) {
-    try {
-      const endMs = Date.now();
-      const startMs = endMs - 3600000;
-      const result = await fetchJson(
-        `${settings.REMOTE_PROVIDER}api/sensor/${sid}/${startMs}/${endMs}`,
-        { cache: "no-store" }
-      );
-      owner = normalizeOwnerKey(result?.sensor);
-      if (owner && result?.sensor) {
-        cacheRosemanOwnerWorkaroundMeta(sid, result.sensor, owner);
-      }
-    } catch {
-      // ignore
-    }
-  }
-
   rosemanOwnerWorkaroundCache.set(sid, { owner: owner || null, ts: Date.now() });
   return owner || null;
 }
@@ -856,8 +893,13 @@ export async function getSensorOwner(sensorId, isoDate = null) {
 
   try {
     const sid = String(sensorId);
-    const idb = await getCachedSensorIdbMeta(sid);
-    if (idb?.owner) return normalizeOwnerKey({ owner: idb.owner });
+    const entry = await readSensorIdbEntry(sid);
+    if (entry && isFreshSensorIdbEntry(entry)) {
+      if (entry.type === "diy") return null;
+      if (entry.owner) return normalizeOwnerKey({ owner: entry.owner });
+      // Day logs were written recently; DIY / no-owner sensors need no v2 owner probe.
+      if (Date.now() - Number(entry.lastUpdated) < REMOTE_DAY_REFRESH_MS) return null;
+    }
 
     const cached = getCachedSensorMeta(sid);
     if (cached) {
@@ -1133,6 +1175,9 @@ export async function getSensorData(
       );
       if (payload?.sensor && typeof payload.sensor === "object") {
         cacheSensorMetaForBundle(sensorId, payload.sensor);
+      } else if (payload != null) {
+        // v2 responded without owner meta — avoid duplicate owner workaround fetch this session.
+        rosemanOwnerWorkaroundCache.set(String(sensorId), { owner: null, ts: Date.now() });
       }
       const historyData = payload?.result;
       // Если данных нет, возвращаем [] (загружено, но пусто), если null/undefined - null (не загружено)
@@ -1256,7 +1301,7 @@ export async function fetchSensorCities() {
 
 // ==================== INDEXEDDB CACHE FUNCTIONS ====================
 
-const SENSOR_IDB_TTL = 24 * 60 * 60 * 1000; // 24 часа
+const SENSOR_IDB_TTL = 24 * 60 * 60 * 1000; // 24 hours
 
 function stripSensorCacheAddress(entry) {
   if (!entry || !("address" in entry)) return entry;
@@ -1384,8 +1429,13 @@ async function saveToCache(sensorId, dataByDate, meta = {}) {
       ttl: 24 * 60 * 60 * 1000,
     });
 
-    IDBworkflow("Sensors", "sensorData", "readwrite", (store) => {
-      store.put(cacheEntry);
+    await new Promise((resolve) => {
+      // Wait for put so a quick page reload can read fresh logs from IDB.
+      IDBworkflow("Sensors", "sensorData", "readwrite", (store) => {
+        const request = store.put(cacheEntry);
+        request.onsuccess = () => resolve();
+        request.onerror = () => resolve();
+      });
     });
 
     // Уведомляем об изменениях в кэше
@@ -1566,8 +1616,8 @@ export async function getSensorDataWithCache(
     const cachedResult = await getCachedData(sensorId, neededDays);
     const cachedData = cachedResult.data;
 
-    // Определяем текущий день
-    const today = new Date().toISOString().split("T")[0];
+    // Local calendar day (matches dayISO / timeline bounds, not UTC).
+    const today = dayISO();
 
     // Если в кэшированном массиве логов последний timestamp заметно раньше конца дня, то принудительно обновляем этот день (кроме today).
     const isLikelyIncompleteDayCache = (day) => {
@@ -1587,11 +1637,16 @@ export async function getSensorDataWithCache(
       return maxTs < Number(dayEndSec) - 10 * 60;
     };
 
-    // Определяем какие дни нужно загрузить
-    // Для текущего дня всегда загружаем данные принудительно (чтобы получать актуальные данные)
-    const missingDays = neededDays.filter(
-      (day) => !cachedData[day] || day === today || isLikelyIncompleteDayCache(day)
-    );
+    // Day tab: trust IDB for REMOTE_DAY_REFRESH_MS. Week/month still re-fetch today.
+    const isDayTab = neededDays.length === 1;
+    const cacheAge = Date.now() - Number(cachedResult.lastUpdated || 0);
+    const missingDays = neededDays.filter((day) => {
+      if (!cachedData[day]) return true;
+      if (isLikelyIncompleteDayCache(day)) return true;
+      if (isDayTab) return cacheAge >= REMOTE_DAY_REFRESH_MS;
+      if (day === today) return true;
+      return false;
+    });
 
     const totalDays = neededDays.length;
     const cachedDays = totalDays - missingDays.length;
@@ -1655,9 +1710,11 @@ export async function getSensorDataWithCache(
       }
       // Сохраняем только успешно загруженные данные (массивы)
       if (Object.keys(newData).length > 0) {
+        const dayLogs = Object.values(newData).find((v) => Array.isArray(v));
         await saveToCache(sensorId, newData, {
           owner: cacheMeta?.owner ?? null,
-          type: cacheMeta?.type ?? null,
+          // Persist device type so getSensorOwner can skip v2 on the next popup open.
+          type: cacheMeta?.type ?? (dayLogs ? inferDeviceTypeFromLog(dayLogs) : null),
         });
       }
     }
@@ -1671,8 +1728,8 @@ export async function getSensorDataWithCache(
       } else if (newData[day]) {
         allData[day] = newData[day];
       } else if (cachedData[day] !== undefined && cachedData[day] !== null) {
-        if (day === today && missingDays.length > 0) {
-          continue; // Не используем кэш для текущего дня если делали запрос
+        if (missingDays.includes(day)) {
+          continue; // stale slice — dropped because we are re-fetching this day
         }
         allData[day] = cachedData[day];
       }

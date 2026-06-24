@@ -36,6 +36,7 @@ import {
 } from "../utils/map/sensors/requests";
 import { hasValidCoordinates } from "../utils/utils";
 import { dayISO, timelineFetchBounds } from "@/utils/date";
+import { getMapAddressZoom } from "@/utils/map/defaultView";
 import { loadLogsHealth } from "../utils/calculations/sensor/logs_health.js";
 
 import {
@@ -790,13 +791,6 @@ export function useSensors() {
     if (!hasValidCoordinates(geo) && sameSensor && hasValidCoordinates(prev?.geo)) {
       geo = prev.geo;
     }
-    if (!hasValidCoordinates(geo) && route.query.lat != null && route.query.lng != null) {
-      const lat = parseFloat(route.query.lat);
-      const lng = parseFloat(route.query.lng);
-      if (Number.isFinite(lat) && Number.isFinite(lng)) {
-        geo = { lat, lng };
-      }
-    }
 
     const isRealtimeTimeline =
       mapState.currentProvider.value === "realtime" &&
@@ -814,7 +808,7 @@ export function useSensors() {
     mapState.mapinactive.value = true;
     const shell = formatPointForSensor({
       sensor_id: sid,
-      geo: geo || { lat: 0, lng: 0 },
+      geo: hasValidCoordinates(geo) ? geo : null,
       model: rawPoint?.model || prev?.model || DEFAULT_SENSOR_MODEL,
       device_model: rawPoint?.device_model ?? prev?.device_model ?? null,
       owner:
@@ -1559,7 +1553,7 @@ export function useSensors() {
     }
     if (normalizeOwnerKey(sensorPoint.value)) {
       rebundleOwnerClusterForPoint(sensorPoint.value);
-    } else {
+    } else if (hasValidCoordinates(sensorPoint.value.geo)) {
       updateSensorMarker(sensorPoint.value);
       setActiveMarker(resolveOwnerClusterMarkerId(sensorPoint.value.sensor_id));
     }
@@ -1942,7 +1936,11 @@ export function useSensors() {
       const { sensors: sensorsData, sensorsNoLocation: sensorsNoLocationData } = await getSensors(
         start,
         end,
-        mapState.currentProvider.value
+        mapState.currentProvider.value,
+        {
+          isoDate: mapState.currentDate.value,
+          timelineMode,
+        }
       );
 
       // Drop result if a newer request superseded this one
@@ -2046,7 +2044,7 @@ export function useSensors() {
     mapState.setMapSettings(route, router, {
       lat: point?.geo?.lat ?? route.query.lat,
       lng: point?.geo?.lng ?? route.query.lng,
-      zoom: route.query.zoom ?? 18,
+      zoom: route.query.zoom ?? getMapAddressZoom(),
       sensor: next,
       owner: nextOwner ? String(nextOwner) : undefined,
     });

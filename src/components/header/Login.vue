@@ -153,9 +153,6 @@ function getSensorLink(sensor) {
     query: {
       provider: "remote", // Default provider for login redirect
       type: config.MAP.measure,
-      zoom: config.MAP.zoom,
-      lat: config.MAP.position.lat,
-      lng: config.MAP.position.lng,
       sensor: sensor,
     },
   };

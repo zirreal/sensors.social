@@ -4,6 +4,7 @@ import * as utils from "../markers";
 import { findMarker as findMarkerGeneral } from "../markers";
 import * as icons from "./icons";
 import * as colors from "./colors";
+import { hasValidCoordinates } from "../../utils";
 
 // Функция для получения контекста (вызывается внутри функций)
 
@@ -118,6 +119,8 @@ function upsertMarker(point, colors, sensor_id = null) {
  * @param {string} [unit] - Единица измерения
  */
 async function addMarker(point, unit = null) {
+  if (!point?.geo || !hasValidCoordinates(point.geo)) return;
+
   // пропускаем датчики с «нулевой» геопозицией
   const tolerance = 0.001;
   const lat = Number(point.geo.lat);

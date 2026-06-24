@@ -10,10 +10,6 @@
   "WIND_PROVIDER": "https://wind.sensors.social/latest",
   "MAP": {
     "zoom": "3",
-    "position": {
-      "lat": "39.0277",
-      "lng": "8.7891"
-    },
     "boundsDelta": {
       "lat": "",
       "lng": ""
@@ -50,6 +46,7 @@
   "DESC": "Welcome to the decentralized opensource sensors map which operates with the sole intent of serving the free will of individuals, without any beneficiaries.",
   "SITE_NAME": "Sensors.social",
   "SITE_URL": "https://sensors.social",
+  "SHARE_URL": "https://share.sensors.social",
   "REPO_NAME": "airalab/sensors.social",
   "TWITTER": "@AIRA_Robonomics"
 }
