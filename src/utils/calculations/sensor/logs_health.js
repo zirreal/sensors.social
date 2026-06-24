@@ -13,24 +13,43 @@ function healthCheckLogs(logArr) {
 }
 
 // Воздух
+/** Пороги «залипшего» PM: низкий std на низких значениях, но с потолком по размаху/среднему. */
+const PM_STABLE_STD_OPTS = {
+  pm25: { threshold: 0.3, minPoints: 40, maxPeak: 3, maxRange: 1.5, maxMean: 2.5 },
+  pm10: { threshold: 0.85, minPoints: 40, maxPeak: 8, maxRange: 4, maxMean: 5 },
+};
+
+function checkPmStableStd(channel, values) {
+  const opts = PM_STABLE_STD_OPTS[channel];
+  if (!opts) return false;
+  return checkStdDeviation(values, opts.threshold, opts);
+}
+
 /**
  * Проверяет, что значения слишком стабильны (залипли) - std слишком маленькое
  * Это может означать, что датчик застрял на одном значении
  * @param {number[]} values - массив значений PM
  * @param {number} threshold - порог std (слишком маленькое отклонение = проблема)
+ * @param {{ minPoints?: number, maxPeak?: number, maxRange?: number, maxMean?: number }} [opts]
  * @returns {boolean} - true, если std < threshold (данные слишком стабильны)
  */
-export function checkStdDeviation(values, threshold) {
-  if (values.length < 3) return false; // слишком мало данных для проверки
-  
+export function checkStdDeviation(values, threshold, opts = {}) {
+  const { minPoints = 3, maxPeak = Infinity, maxRange = Infinity, maxMean = Infinity } = opts;
+  if (values.length < minPoints) return false;
+
   // Фильтруем нулевые значения - они не считаются "залипшими"
   const nonZeroValues = values.filter(v => v !== undefined && v !== null && v > 0);
-  if (nonZeroValues.length < 3) return false;
-  
+  if (nonZeroValues.length < minPoints) return false;
+
   const mean = nonZeroValues.reduce((a, b) => a + b, 0) / nonZeroValues.length;
   const variance = nonZeroValues.reduce((a, b) => a + Math.pow(b - mean, 2), 0) / nonZeroValues.length;
   const std = Math.sqrt(variance);
-  
+  const peak = Math.max(...nonZeroValues);
+  const range = peak - Math.min(...nonZeroValues);
+
+  // Чистый воздух с реальным размахом (напр. PM2.5 1.0–2.5 µg/m³) не считаем залипшим.
+  if (peak > maxPeak || range > maxRange || mean > maxMean) return false;
+
   // Проверяем, что std слишком маленькое И среднее значение не нулевое
   // Это означает, что значения "залипли" на одном числе
   return std < threshold && mean > 1;
@@ -111,11 +130,89 @@ export function checkInstantJumps(values) {
     const jumpRatio = jumpCount / totalChecks;
     // Если больше 60% проверок показали большие скачки - это проблема
     if (jumpRatio >= 0.6) {
-      return true;
+      // Редкие всплески (костёр, сигареты) — норма; канал сломан, если высокий PM держится долго
+      const elevatedRatio =
+        values.filter((v) => Number.isFinite(v) && v >= LARGE_VALUE_THRESHOLD).length / values.length;
+      if (elevatedRatio >= 0.12) {
+        return true;
+      }
     }
   }
 
+  // Повторяющиеся скачки на «городских» уровнях PM (напр. 110 ↔ 415 µg/m³) — ниже порога
+  // 500 для очень высоких значений, но типично для сломанного канала пыли.
+  const MID_PM_HI = 80;
+  const MID_PM_LO = 25;
+  const MID_PM_JUMP = 130;
+  const midElevatedRatio =
+    values.filter((v) => Number.isFinite(v) && v >= MID_PM_HI).length / values.length;
+  if (midElevatedRatio < 0.12) {
+    return false;
+  }
+  let midEligible = 0;
+  let midSwings = 0;
+
+  for (let i = 1; i < values.length; i++) {
+    const a = values[i - 1];
+    const b = values[i];
+    if (!Number.isFinite(a) || !Number.isFinite(b)) continue;
+    const hi = Math.max(a, b);
+    const lo = Math.min(a, b);
+    if (hi < MID_PM_HI || lo < MID_PM_LO) continue;
+    midEligible++;
+    if (Math.abs(a - b) >= MID_PM_JUMP) midSwings++;
+  }
+
+  if (midEligible >= 4 && midSwings >= 3 && midSwings / midEligible >= 0.35) {
+    return true;
+  }
+
   return false;
+}
+
+/**
+ * Широкие колебания PM на повышенном уровне (напр. 110 ↔ 415 µg/m³ за день).
+ * При редких логах соседние точки меняются плавно, но график всё равно «горка».
+ * @param {number[]} values
+ * @returns {boolean}
+ */
+export function checkPmWideSwing(values) {
+  const MIN_POINTS = 8;
+  if (!values || values.length < MIN_POINTS) return false;
+
+  const valid = values.filter((v) => Number.isFinite(v) && v > 0);
+  if (valid.length < MIN_POINTS) return false;
+
+  const min = Math.min(...valid);
+  const max = Math.max(...valid);
+  const range = max - min;
+
+  const FLOOR = 70;
+  const HIGH_PEAK = 280;
+  const MIN_RANGE = 200;
+  const HI_BAND = 300;
+  const LO_BAND = 180;
+
+  if (min < FLOOR || max < HIGH_PEAK || range < MIN_RANGE) return false;
+
+  let bandSwings = 0;
+  let lastBand = null;
+  for (const v of valid) {
+    const band = v >= HI_BAND ? "hi" : v <= LO_BAND ? "lo" : null;
+    if (!band) continue;
+    if (lastBand && band !== lastBand) bandSwings++;
+    lastBand = band;
+  }
+  if (bandSwings >= 2) return true;
+
+  const mid = (min + max) / 2;
+  let crossings = 0;
+  for (let i = 1; i < valid.length; i++) {
+    const a = valid[i - 1];
+    const b = valid[i];
+    if ((a < mid && b >= mid) || (a >= mid && b < mid)) crossings++;
+  }
+  return crossings >= 3;
 }
 
 /**
@@ -284,11 +381,13 @@ export function checkStability(logArr) {
   if (!logArr || logArr.length < 2) return {};
 
   const logs = healthCheckLogs(logArr);
-  const pm25Values = logs.map((d) => d.data.pm25);
-  const pm10Values = logs.map((d) => d.data.pm10);
+  // Some providers / devices may return sparse points without `data`.
+  // Health checks must never crash the chart rendering.
+  const pm25Values = logs.map((d) => d?.data?.pm25);
+  const pm10Values = logs.map((d) => d?.data?.pm10);
 
-  const stableStdPM25 = checkStdDeviation(pm25Values, 0.3);
-  const stableStdPM10 = checkStdDeviation(pm10Values, 0.5);
+  const stableStdPM25 = checkPmStableStd("pm25", pm25Values);
+  const stableStdPM10 = checkPmStableStd("pm10", pm10Values);
 
   return {
     // Залипание хотя бы одного канала — подозрительно (раньше требовались оба)
@@ -296,6 +395,7 @@ export function checkStability(logArr) {
     stableStdPM25,
     stableStdPM10,
     instantJumps: checkInstantJumps(pm25Values) || checkInstantJumps(pm10Values),
+    wideSwing: checkPmWideSwing(pm25Values) || checkPmWideSwing(pm10Values),
     lowRatio: checkLowRatio(pm25Values, pm10Values),
     impossiblePM: checkImpossiblePM(pm25Values, pm10Values),
     alwaysZeroPM25: checkAlwaysZeroPM25(pm25Values),
@@ -650,6 +750,7 @@ export const HEALTH_CHECK_METRICS = {
     stableStdPM25: ["pm25"],
     stableStdPM10: ["pm10"],
     instantJumps: ["pm25", "pm10"],
+    wideSwing: ["pm25", "pm10"],
     lowRatio: ["pm25", "pm10"],
     impossiblePM: ["pm25", "pm10"],
     alwaysZeroPM25: ["pm25"],
@@ -750,14 +851,19 @@ function resolvePmUnhealthyMetricIds(checks, logArr) {
       if (pmMetricHasData(pm10Values)) ids.add("pm10");
     }
 
-    if (checkStdDeviation(pm25Values, 0.3)) ids.add("pm25");
-    if (checkStdDeviation(pm10Values, 0.5)) ids.add("pm10");
+    if (checkPmStableStd("pm25", pm25Values)) ids.add("pm25");
+    if (checkPmStableStd("pm10", pm10Values)) ids.add("pm10");
     if (checkAlwaysZeroPM25(pm25Values)) ids.add("pm25");
     if (checkAlwaysZeroPM10(pm10Values)) ids.add("pm10");
 
     if (checks.instantJumps) {
       if (checkInstantJumps(pm25Values)) ids.add("pm25");
       if (checkInstantJumps(pm10Values)) ids.add("pm10");
+    }
+
+    if (checks.wideSwing) {
+      if (checkPmWideSwing(pm25Values)) ids.add("pm25");
+      if (checkPmWideSwing(pm10Values)) ids.add("pm10");
     }
 
     if (checks.impossiblePM || checks.lowRatio) {
@@ -877,6 +983,86 @@ export function checkAllLogsHealth(logArr) {
   );
 }
 
+function mergeCategoryHealthFromDays(checksList) {
+  if (!checksList.length) return categoryHealthFromChecks({});
+  const merged = {};
+  for (const checks of checksList) {
+    for (const [name, failed] of Object.entries(checks)) {
+      if (failed === true) merged[name] = true;
+    }
+  }
+  return categoryHealthFromChecks(merged);
+}
+
+/**
+ * Health checks for chart period: one pass/fail per calendar day, OR-merged for week/month.
+ * @param {Array} logArr
+ * @param {string[]|null} visibleDates - YYYY-MM-DD keys from timeline (day / week / month)
+ */
+export function checkAllLogsHealthForVisiblePeriod(logArr, visibleDates = null) {
+  if (!logArr || logArr.length < 2) {
+    return allCategoriesEmptyUiHealth();
+  }
+
+  const partition = partitionLogsByDay(logArr);
+  const dates =
+    Array.isArray(visibleDates) && visibleDates.length > 0
+      ? visibleDates
+      : [...partition.keys()].sort();
+
+  const dayChecksByCategory = Object.fromEntries(
+    HEALTH_DAY_KEYS.map((key) => [key, []])
+  );
+
+  let daysChecked = 0;
+  for (const date of dates) {
+    const dayLogs = partition.get(date);
+    if (!dayLogs || dayLogs.length < 2) continue;
+    daysChecked++;
+    for (const key of HEALTH_DAY_KEYS) {
+      dayChecksByCategory[key].push(HEALTH_CHECKS_BY_CATEGORY[key](dayLogs));
+    }
+  }
+
+  if (!daysChecked) return checkAllLogsHealth(logArr);
+
+  return Object.fromEntries(
+    HEALTH_DAY_KEYS.map((key) => [key, mergeCategoryHealthFromDays(dayChecksByCategory[key])])
+  );
+}
+
+/**
+ * Union of unhealthy metric ids across days in the visible chart period.
+ */
+export function unhealthyMetricIdsForVisiblePeriod(categoryKey, logArr, visibleDates = null) {
+  if (!logArr || logArr.length < 2 || !categoryKey) return [];
+
+  const partition = partitionLogsByDay(logArr);
+  const dates =
+    Array.isArray(visibleDates) && visibleDates.length > 0
+      ? visibleDates
+      : [...partition.keys()].sort();
+  const ids = new Set();
+
+  for (const date of dates) {
+    const dayLogs = partition.get(date);
+    if (!dayLogs || dayLogs.length < 2) continue;
+    const dayCat = categoryHealthFromChecks(HEALTH_CHECKS_BY_CATEGORY[categoryKey](dayLogs));
+    if (!isLogsHealthCategoryUnhealthy(dayCat)) continue;
+    resolveUnhealthyMetricIds(categoryKey, dayCat, dayLogs).forEach((id) => ids.add(id));
+  }
+
+  const order =
+    categoryKey === "pm"
+      ? PM_METRIC_ORDER
+      : categoryKey === "climate"
+        ? CLIMATE_METRIC_ORDER
+        : categoryKey === "noise"
+          ? NOISE_METRIC_ORDER
+          : [];
+  return sortMetricIds([...ids], order);
+}
+
 // --- logsHealth: схема записи в IndexedDB, мерж по дням, агрегат для UI ---
 
 const DATE_KEY_RE = /^\d{4}-\d{2}-\d{2}$/;
@@ -937,6 +1123,7 @@ const HEALTHY_DAY_EMPTY_BY_CATEGORY = {
     alwaysZeroPM10: false,
     impossiblePM: false,
     instantJumps: false,
+    wideSwing: false,
     lowRatio: false,
     stableStd: false,
     stableStdPM25: false,
