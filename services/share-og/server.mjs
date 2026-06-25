@@ -4,6 +4,12 @@
  */
 
 import http from "node:http";
+import fs from "node:fs/promises";
+import path from "node:path";
+import crypto from "node:crypto";
+import { fileURLToPath } from "node:url";
+
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 const PORT = Number(process.env.PORT || 3080);
 const REMOTE_PROVIDER = process.env.REMOTE_PROVIDER || "https://roseman.robonomics.network/";
@@ -15,9 +21,134 @@ const DEFAULT_DESC =
   process.env.DEFAULT_DESC ||
   "Welcome to the decentralized opensource sensors map which operates with the sole intent of serving the free will of individuals, without any beneficiaries.";
 const OG_IMAGE = process.env.OG_IMAGE || `${SITE_URL}/og-default.webp`;
+const CACHE_DIR = process.env.CACHE_DIR || path.join(__dirname, "cache");
+const GEO_CACHE_DIR = path.join(CACHE_DIR, "geo");
+const OG_CACHE_DIR = path.join(CACHE_DIR, "og");
+const CACHE_PURGE_TOKEN = String(process.env.CACHE_PURGE_TOKEN || "").trim();
+
+/** Bot HTML may be cached by crawlers for a week; server disk cache is indefinite until purge. */
+const BOT_CACHE_CONTROL = "public, max-age=604800, immutable";
 
 const BOT_UA =
   /bot|telegram|facebook|twitter|linkedin|slack|discord|whatsapp|vkshare|preview|embed|facebot|ia_archiver/i;
+
+async function ensureCacheDirs() {
+  await fs.mkdir(GEO_CACHE_DIR, { recursive: true });
+  await fs.mkdir(OG_CACHE_DIR, { recursive: true });
+}
+
+function ogMetaCacheKey(sensorId, searchParams) {
+  const parts = [];
+  for (const key of ["sensor", "type", "provider", "date", "owner"]) {
+    const value = searchParams.get(key);
+    if (value) parts.push(`${key}=${value}`);
+  }
+  if (!parts.some((p) => p.startsWith("sensor="))) {
+    parts.unshift(`sensor=${sensorId}`);
+  }
+  return parts.join("&");
+}
+
+function geoAddressCacheKey(lat, lng) {
+  return `${Number(lat).toFixed(4)},${Number(lng).toFixed(4)}`;
+}
+
+function safeCacheFileName(value) {
+  return String(value).replace(/[^a-zA-Z0-9._-]/g, "_");
+}
+
+function ogCacheFilePath(cacheKey) {
+  const hash = crypto.createHash("sha256").update(cacheKey).digest("hex");
+  return path.join(OG_CACHE_DIR, `${hash}.json`);
+}
+
+function geoCacheFilePath(lat, lng) {
+  return path.join(GEO_CACHE_DIR, `${safeCacheFileName(geoAddressCacheKey(lat, lng))}.json`);
+}
+
+async function readJsonFile(filePath) {
+  try {
+    const raw = await fs.readFile(filePath, "utf8");
+    return JSON.parse(raw);
+  } catch {
+    return null;
+  }
+}
+
+async function readOgMetaCache(cacheKey) {
+  const data = await readJsonFile(ogCacheFilePath(cacheKey));
+  if (!data?.title) return null;
+  return { title: data.title, description: data.description };
+}
+
+async function writeOgMetaCache(cacheKey, meta) {
+  await ensureCacheDirs();
+  await fs.writeFile(
+    ogCacheFilePath(cacheKey),
+    JSON.stringify(
+      {
+        key: cacheKey,
+        title: meta.title,
+        description: meta.description,
+        savedAt: new Date().toISOString(),
+      },
+      null,
+      0
+    )
+  );
+}
+
+async function readGeoAddressCache(lat, lng) {
+  const data = await readJsonFile(geoCacheFilePath(lat, lng));
+  return data?.address || null;
+}
+
+async function writeGeoAddressCache(lat, lng, address) {
+  if (!address) return;
+  await ensureCacheDirs();
+  await fs.writeFile(
+    geoCacheFilePath(lat, lng),
+    JSON.stringify(
+      {
+        lat: Number(lat),
+        lng: Number(lng),
+        address,
+        savedAt: new Date().toISOString(),
+      },
+      null,
+      0
+    )
+  );
+}
+
+async function purgeCache(scope = "all") {
+  await ensureCacheDirs();
+
+  const removeDirFiles = async (dir) => {
+    const names = await fs.readdir(dir).catch(() => []);
+    await Promise.all(names.map((name) => fs.unlink(path.join(dir, name)).catch(() => {})));
+  };
+
+  if (scope === "all" || scope === "geo") {
+    await removeDirFiles(GEO_CACHE_DIR);
+  }
+  if (scope === "all" || scope === "og") {
+    await removeDirFiles(OG_CACHE_DIR);
+  }
+}
+
+async function cacheStats() {
+  await ensureCacheDirs();
+  const count = async (dir) => {
+    const names = await fs.readdir(dir).catch(() => []);
+    return names.length;
+  };
+  return {
+    geoEntries: await count(GEO_CACHE_DIR),
+    ogEntries: await count(OG_CACHE_DIR),
+    cacheDir: CACHE_DIR,
+  };
+}
 
 const MEASUREMENT_LABELS = {
   pm10: "PM10",
@@ -128,16 +259,6 @@ function todayIso() {
   return new Date().toISOString().slice(0, 10);
 }
 
-async function fetchMarkerRow(sensorId, isoDate) {
-  const { start, end } = dayBoundsUnix(isoDate);
-  const url = `${REMOTE_PROVIDER}api/v2/sensor/markers/${start}/${end}`;
-  const res = await fetch(url);
-  if (!res.ok) return null;
-  const payload = await res.json();
-  const rows = Array.isArray(payload?.result) ? payload.result : [];
-  return rows.find((row) => String(row?.sensor_id || "") === String(sensorId)) || null;
-}
-
 async function fetchSensorDay(sensorId, isoDate) {
   const day = isoDate || todayIso();
   const { start, end } = dayBoundsUnix(day);
@@ -151,36 +272,18 @@ async function fetchSensorDay(sensorId, isoDate) {
   };
 }
 
-function geoFromMarker(marker) {
-  const lat = Number(marker?.geo?.lat);
-  const lng = Number(marker?.geo?.lng);
-  if (!Number.isFinite(lat) || !Number.isFinite(lng) || (lat === 0 && lng === 0)) return null;
-  return { lat, lng };
-}
-
 function logFromSensorMeta(sensorMeta, sensorId) {
   const bag = sensorMeta?.data?.[sensorId];
   return Array.isArray(bag) ? bag : [];
 }
 
-function hasSensorOwner(marker, sensorMeta) {
-  return Boolean(String(marker?.owner || sensorMeta?.owner || "").trim());
-}
-
-function sensorTypeFromDeviceModel(model) {
-  const key = String(model || "").toLowerCase().trim();
-  if (key === "insight") return "insight";
-  if (key === "urban") return "urban";
-  if (key === "dual") return "dual";
-  return null;
+function hasSensorOwner(sensorMeta) {
+  return Boolean(String(sensorMeta?.owner || "").trim());
 }
 
 /** Match frontend: no owner → DIY; log inference only for owned Altruist devices. */
-function inferDeviceTypeFromMeta(marker, log, sensorMeta, sensorId) {
-  if (!hasSensorOwner(marker, sensorMeta)) return "diy";
-
-  const fromModel = sensorTypeFromDeviceModel(marker?.device_model);
-  if (fromModel) return fromModel;
+function inferDeviceTypeFromMeta(log, sensorMeta, sensorId) {
+  if (!hasSensorOwner(sensorMeta)) return "diy";
 
   const fromLog = inferDeviceTypeFromLog(log);
   if (fromLog) return fromLog;
@@ -202,6 +305,9 @@ function geoFromLog(log) {
 }
 
 async function reverseGeocode(lat, lng) {
+  const cached = await readGeoAddressCache(lat, lng);
+  if (cached) return cached;
+
   const url = `https://nominatim.openstreetmap.org/reverse?format=jsonv2&lat=${encodeURIComponent(
     lat
   )}&lon=${encodeURIComponent(lng)}&zoom=18&addressdetails=1&accept-language=en`;
@@ -222,8 +328,9 @@ async function reverseGeocode(lat, lng) {
   if (road) parts.push(road);
   const house = a.house_number || "";
   if (house) parts.push(house);
-  if (parts.length) return parts.join(", ");
-  return data?.display_name || null;
+  const address = parts.length ? parts.join(", ") : data?.display_name || null;
+  await writeGeoAddressCache(lat, lng, address);
+  return address;
 }
 
 function escapeHtml(value) {
@@ -272,6 +379,10 @@ function mapRedirectUrl(searchParams) {
 }
 
 async function buildOgMetaForSensor(sensorId, searchParams) {
+  const cacheKey = ogMetaCacheKey(sensorId, searchParams);
+  const cached = await readOgMetaCache(cacheKey);
+  if (cached) return cached;
+
   const query = {
     type: searchParams.has("type") ? searchParams.get("type") : null,
     provider: searchParams.get("provider") || "remote",
@@ -279,83 +390,140 @@ async function buildOgMetaForSensor(sensorId, searchParams) {
   };
 
   const isoDate = query.date || todayIso();
-  const [marker, { log, sensor }] = await Promise.all([
-    fetchMarkerRow(sensorId, isoDate),
-    fetchSensorDay(sensorId, isoDate),
-  ]);
+  const { log, sensor } = await fetchSensorDay(sensorId, isoDate);
 
-  const geo =
-    geoFromMarker(marker) ||
-    geoFromLog(log) ||
-    geoFromLog(logFromSensorMeta(sensor, sensorId));
+  const geo = geoFromLog(log) || geoFromLog(logFromSensorMeta(sensor, sensorId));
   const address = geo ? await reverseGeocode(geo.lat, geo.lng) : null;
-  const deviceType = inferDeviceTypeFromMeta(marker, log, sensor, sensorId);
+  const deviceType = inferDeviceTypeFromMeta(log, sensor, sensorId);
 
-  return buildMeta({ sensorId, query, address, deviceType });
+  const meta = buildMeta({ sensorId, query, address, deviceType });
+  await writeOgMetaCache(cacheKey, meta);
+  return meta;
 }
 
 function isBot(userAgent) {
   return BOT_UA.test(String(userAgent || ""));
 }
 
-const server = http.createServer(async (req, res) => {
-  try {
-    const url = new URL(req.url || "/", `http://${req.headers.host || "localhost"}`);
+function purgeAuthOk(req, url) {
+  if (!CACHE_PURGE_TOKEN) return false;
+  const header = String(req.headers.authorization || "").replace(/^Bearer\s+/i, "");
+  const token = header || url.searchParams.get("token") || "";
+  return token === CACHE_PURGE_TOKEN;
+}
 
-    if (url.pathname === "/health") {
-      res.writeHead(200, { "content-type": "text/plain; charset=utf-8" });
-      res.end("ok");
-      return;
-    }
+async function handleRequest(req, res) {
+  const url = new URL(req.url || "/", `http://${req.headers.host || "localhost"}`);
 
-    if (url.pathname !== "/") {
-      res.writeHead(404, { "content-type": "text/plain; charset=utf-8" });
-      res.end("not found");
-      return;
-    }
-
-    const sensorId = url.searchParams.get("sensor");
-    const redirectUrl = mapRedirectUrl(url.searchParams);
-    const pageUrl = `${SHARE_URL}${url.pathname}${url.search}`;
-
-    if (!sensorId) {
-      if (isBot(req.headers["user-agent"])) {
-        const html = buildBotHtml(
-          { title: DEFAULT_TITLE, description: DEFAULT_DESC, redirectUrl },
-          pageUrl
-        );
-        res.writeHead(200, {
-          "content-type": "text/html; charset=utf-8",
-          "cache-control": "public, max-age=300",
-        });
-        res.end(html);
-        return;
-      }
-      res.writeHead(302, { location: SITE_URL });
-      res.end();
-      return;
-    }
-
-    if (!isBot(req.headers["user-agent"])) {
-      res.writeHead(302, { location: redirectUrl });
-      res.end();
-      return;
-    }
-
-    const meta = await buildOgMetaForSensor(sensorId, url.searchParams);
-    const html = buildBotHtml({ ...meta, redirectUrl }, pageUrl);
-    res.writeHead(200, {
-      "content-type": "text/html; charset=utf-8",
-      "cache-control": "public, max-age=300",
-    });
-    res.end(html);
-  } catch (error) {
-    console.error("share-og error", error);
-    res.writeHead(500, { "content-type": "text/plain; charset=utf-8" });
-    res.end("error");
+  if (url.pathname === "/health") {
+    res.writeHead(200, { "content-type": "text/plain; charset=utf-8" });
+    res.end("ok");
+    return;
   }
-});
 
-server.listen(PORT, "127.0.0.1", () => {
-  console.log(`share-og listening on http://127.0.0.1:${PORT}`);
+  if (url.pathname === "/admin/cache-stats" && req.method === "GET") {
+    if (!purgeAuthOk(req, url)) {
+      res.writeHead(401, { "content-type": "text/plain; charset=utf-8" });
+      res.end("unauthorized");
+      return;
+    }
+    const stats = await cacheStats();
+    res.writeHead(200, { "content-type": "application/json; charset=utf-8" });
+    res.end(JSON.stringify(stats));
+    return;
+  }
+
+  if (url.pathname === "/admin/purge-cache" && req.method === "POST") {
+    if (!purgeAuthOk(req, url)) {
+      res.writeHead(401, { "content-type": "text/plain; charset=utf-8" });
+      res.end("unauthorized");
+      return;
+    }
+    const scope = url.searchParams.get("scope") || "all";
+    if (!["all", "geo", "og"].includes(scope)) {
+      res.writeHead(400, { "content-type": "text/plain; charset=utf-8" });
+      res.end("scope must be all, geo, or og");
+      return;
+    }
+    await purgeCache(scope);
+    const stats = await cacheStats();
+    res.writeHead(200, { "content-type": "application/json; charset=utf-8" });
+    res.end(JSON.stringify({ ok: true, scope, ...stats }));
+    return;
+  }
+
+  if (url.pathname !== "/") {
+    res.writeHead(404, { "content-type": "text/plain; charset=utf-8" });
+    res.end("not found");
+    return;
+  }
+
+  const sensorId = url.searchParams.get("sensor");
+  const redirectUrl = mapRedirectUrl(url.searchParams);
+  const pageUrl = `${SHARE_URL}${url.pathname}${url.search}`;
+
+  if (!sensorId) {
+    if (isBot(req.headers["user-agent"])) {
+      const html = buildBotHtml(
+        { title: DEFAULT_TITLE, description: DEFAULT_DESC, redirectUrl },
+        pageUrl
+      );
+      res.writeHead(200, {
+        "content-type": "text/html; charset=utf-8",
+        "cache-control": BOT_CACHE_CONTROL,
+      });
+      res.end(html);
+      return;
+    }
+    res.writeHead(302, { location: SITE_URL });
+    res.end();
+    return;
+  }
+
+  if (!isBot(req.headers["user-agent"])) {
+    res.writeHead(302, { location: redirectUrl });
+    res.end();
+    return;
+  }
+
+  const meta = await buildOgMetaForSensor(sensorId, url.searchParams);
+  const html = buildBotHtml({ ...meta, redirectUrl }, pageUrl);
+  res.writeHead(200, {
+    "content-type": "text/html; charset=utf-8",
+    "cache-control": BOT_CACHE_CONTROL,
+  });
+  res.end(html);
+}
+
+async function main() {
+  if (process.argv.includes("--purge-cache")) {
+    const scopeArg = process.argv.find((arg) => arg.startsWith("--scope="));
+    const scope = scopeArg ? scopeArg.split("=")[1] : "all";
+    await purgeCache(scope);
+    const stats = await cacheStats();
+    console.log(`Purged share-og cache (${scope})`, stats);
+    return;
+  }
+
+  await ensureCacheDirs();
+
+  const server = http.createServer(async (req, res) => {
+    try {
+      await handleRequest(req, res);
+    } catch (error) {
+      console.error("share-og error", error);
+      res.writeHead(500, { "content-type": "text/plain; charset=utf-8" });
+      res.end("error");
+    }
+  });
+
+  server.listen(PORT, "127.0.0.1", () => {
+    console.log(`share-og listening on http://127.0.0.1:${PORT}`);
+    console.log(`share-og disk cache: ${CACHE_DIR}`);
+  });
+}
+
+main().catch((error) => {
+  console.error(error);
+  process.exit(1);
 });

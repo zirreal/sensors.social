@@ -30,3 +30,7 @@ coverage
 *.sw?
 
 commit.txt
+
+# share-og VPS disk cache (runtime data)
+services/share-og/cache/geo/
+services/share-og/cache/og/
