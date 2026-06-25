@@ -918,7 +918,12 @@ export function useSensors() {
     if (ownerKey) {
       point.owner = ownerKey;
       if (!point.ownerSensorsWithData?.length) {
-        const ids = await ensureOwnerSensorIds({ ...point, owner: ownerKey }, ownerKey);
+        const ids = await ensureOwnerSensorIds(
+          { ...point, owner: ownerKey },
+          ownerKey,
+          null,
+          sensors.value
+        );
         const fullBundle = await buildOwnerSensorsWithDataAsync(
           { ...point, owner: ownerKey, ownerSensorIds: ids },
           sensors.value,
@@ -1823,7 +1828,7 @@ export function useSensors() {
   };
 
   /**
-   * Load owner device list from api/sensor/sensors/{owner} for SensorPicker and map cluster.
+   * Load owner device ids for SensorPicker and map cluster (map list + v2 meta, no owner API).
    * Owner comes from the point or URL (?owner=); DIY sensors skip this (no owner).
    * @param {string} sensorId - Open popup sensor id
    * @param {number} [session=popupSessionId] - Popup session guard
@@ -1838,7 +1843,9 @@ export function useSensors() {
 
     const ids = await ensureOwnerSensorIds(
       { ...(point || {}), sensor_id: sid, owner: ownerKey },
-      ownerKey
+      ownerKey,
+      null,
+      sensors.value
     );
     if (session !== popupSessionId || !isSensorOpen(sid)) return;
 
