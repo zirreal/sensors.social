@@ -3,11 +3,13 @@ import { useI18n } from "vue-i18n";
 import { useMap } from "@/composables/useMap";
 import { useSensors } from "@/composables/useSensors";
 import measurements from "@/measurements";
+import { enumeratePeriodDates } from "@/utils/date";
 import {
-  checkAllLogsHealth,
+  checkAllLogsHealthForVisiblePeriod,
   isLogsHealthCategoryUnhealthy,
   loadLogsHealth,
   resolveUnhealthyMetricIds,
+  unhealthyMetricIdsForVisiblePeriod,
   useLogsHealth,
 } from "@/utils/calculations/sensor/logs_health.js";
 
@@ -39,17 +41,6 @@ function metricDisplayName(unitId, locale) {
   const entry = measurements[id];
   if (!entry) return "";
   return entry.nameshort?.[locale] || entry.name?.[locale] || entry.name?.en || "";
-}
-
-function unhealthyMetricLabelsForCategory(healthCat, checksSource, logArr, locale) {
-  let metricIds = resolveUnhealthyMetricIds(healthCat, checksSource, logArr);
-
-  if (!metricIds.length && logArr?.length > 1) {
-    const fromLog = checkAllLogsHealth(logArr)[healthCat];
-    metricIds = resolveUnhealthyMetricIds(healthCat, fromLog, logArr);
-  }
-
-  return metricIds.map((id) => metricDisplayName(id, locale)).filter(Boolean);
 }
 
 /**
@@ -105,6 +96,10 @@ export function useChartHealthWarning(sources) {
     healthCategoryForChart(toValue(sources.legendKey), mapState.currentUnit.value)
   );
 
+  const visibleDates = computed(() =>
+    enumeratePeriodDates(mapState.currentDate.value, mapState.timelineMode.value)
+  );
+
   const unhealthyMetricLabels = computed(() => {
     if (!runLogsHealth.value) return [];
 
@@ -114,16 +109,23 @@ export function useChartHealthWarning(sources) {
     const log = toValue(sources.log);
     const logArr = Array.isArray(log) && log.length > 1 ? log : null;
     const fromAggregate = logsHealthUi.value?.[healthCat];
-    const fromLog = logArr ? checkAllLogsHealth(logArr)[healthCat] : null;
+    const dates = visibleDates.value;
+    const fromLog = logArr
+      ? checkAllLogsHealthForVisiblePeriod(logArr, dates)[healthCat]
+      : null;
 
-    if (!isLogsHealthCategoryUnhealthy(fromAggregate) && !isLogsHealthCategoryUnhealthy(fromLog)) {
-      return [];
+    // Chart logs are the source of truth for the open popup; IDB is fallback only.
+    if (logArr) {
+      if (!isLogsHealthCategoryUnhealthy(fromLog)) return [];
+      return unhealthyMetricIdsForVisiblePeriod(healthCat, logArr, dates)
+        .map((id) => metricDisplayName(id, locale.value))
+        .filter(Boolean);
     }
 
-    const checksSource = isLogsHealthCategoryUnhealthy(fromLog)
-      ? fromLog
-      : fromAggregate;
-    return unhealthyMetricLabelsForCategory(healthCat, checksSource, logArr, locale.value);
+    if (!isLogsHealthCategoryUnhealthy(fromAggregate)) return [];
+    return resolveUnhealthyMetricIds(healthCat, fromAggregate, null)
+      .map((id) => metricDisplayName(id, locale.value))
+      .filter(Boolean);
   });
 
   const metricsLabel = computed(() => unhealthyMetricLabels.value.join(", "));
