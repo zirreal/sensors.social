@@ -8,8 +8,6 @@ const MAP_LAYER_EXCLUDE = new Set([
   "airtempavg",
   "airtempmax",
   "airtempmin",
-  "no2",
-  "o3",
   "pm1",
   "rainfall",
   "sat10",
