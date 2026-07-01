@@ -3,7 +3,7 @@
  * Geo filtering uses OWNER_GEO_CLUSTER_KM (3 km) so nationwide owner accounts do not
  * pollute a single map marker or popup cluster.
  */
-import { peekUserSensorsCache, getUserSensorsList } from "@/composables/useAccounts";
+import { peekUserSensorsCache } from "@/composables/useAccounts";
 import { resolveSensorType } from "@/composables/sensorDeviceTypes";
 import { hasValidCoordinates } from "../utils/utils";
 import { dayISO } from "@/utils/date";
@@ -23,6 +23,7 @@ import {
   hasSensorOwner,
   haversineKm,
   OWNER_GEO_CLUSTER_KM,
+  collectOwnerDeviceIds,
   sensorFetchBoundsForDate,
   sensorTypeFromDeviceModel,
 } from "../utils/map/sensors/requests";
@@ -401,14 +402,21 @@ function buildOwnerBundleFromV2Meta(point, sensorsList, clusterBundle = true) {
   return getOwnerSensorsWithData(sid, anchorGeo, sensorsList, clusterBundle);
 }
 
-export async function ensureOwnerSensorIds(point, ownerKey, ownerSensorIds = null) {
+/**
+ * Resolve owner device ids without `api/sensor/sensors/{owner}`
+ * Order: explicit/cache → map markers list → v2 sensor meta preload.
+ */
+export async function ensureOwnerSensorIds(
+  point,
+  ownerKey,
+  ownerSensorIds = null,
+  sensorsList = null
+) {
   let ids = resolveOwnerSensorIds(point, ownerKey, ownerSensorIds);
   if (ids?.length) return ids;
 
-  if (ownerKey) {
-    const fetched = await getUserSensorsList(ownerKey);
-    if (fetched?.length) return fetched.map((id) => String(id));
-  }
+  const fromMap = collectOwnerDeviceIds(ownerKey, sensorsList);
+  if (fromMap.length) return fromMap;
 
   const sid = point?.sensor_id ? String(point.sensor_id) : "";
   if (!sid) return null;
@@ -422,7 +430,7 @@ export async function ensureOwnerSensorIds(point, ownerKey, ownerSensorIds = nul
 }
 
 function mergeOwnerBundleSources(point, sensorsList, anchorGeo, fromOwnerApi, clusterBundle) {
-  // Priority: owner API list → v2 meta → markers on map (last wins on conflicts).
+  // Priority: resolved owner ids → v2 meta → markers on map (last wins on conflicts).
   const fromV2 = buildOwnerBundleFromV2Meta(point, sensorsList, clusterBundle);
   const pubsub = buildPubsubOwnerList(point, sensorsList, anchorGeo, clusterBundle);
   let merged = mergeOwnerBundleLists(fromOwnerApi, fromV2);
@@ -453,7 +461,7 @@ export function buildOwnerSensorsWithData(
   return mergeOwnerBundleSources(point, sensorsList, anchorGeo, fromOwnerApi, clusterBundle);
 }
 
-/** Async bundle build: may fetch owner device list and preload v2 meta. */
+/** Async bundle build: may preload v2 meta and merge map markers. */
 export async function buildOwnerSensorsWithDataAsync(
   point,
   sensorsList,
@@ -464,7 +472,7 @@ export async function buildOwnerSensorsWithDataAsync(
   if (!ownerKey && !point?.sensor_id) return null;
 
   const sid = point?.sensor_id;
-  const ids = await ensureOwnerSensorIds(point, ownerKey, ownerSensorIds);
+  const ids = await ensureOwnerSensorIds(point, ownerKey, ownerSensorIds, sensorsList);
   const anchorGeo = resolveBundleAnchorGeo(point, sensorsList);
 
   let fromOwnerApi = null;

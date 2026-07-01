@@ -25,6 +25,8 @@ export default {
   "sensorpopup.deletebookmark": "Удалить закладку",
   "sensorpopup.infosensorid": "ID датчика",
   "sensorpopup.infosensorgeo": "Геопозиция датчика",
+  "sensorpopup.geoNotFound": "Геопозиция не найдена",
+  "sensorpopup.sensorIdHeader": "Сенсор {id}",
   "sensorpopup.infosensorowner": "Владелец датчика",
   "sensorpopup.sharedefault": "Поделиться",
   "sensorpopup.sharelink": "Скопировать ссылку на датчик",

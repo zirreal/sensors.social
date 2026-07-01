@@ -57,6 +57,7 @@ import { computed, onBeforeUnmount, onMounted, ref, watch, nextTick } from "vue"
 import { settings } from "@config";
 import { useMap } from "@/composables/useMap";
 import { dayISO } from "@/utils/date";
+import { getMapAddressZoom } from "@/utils/map/defaultView";
 import {
   fetchStoryList,
   getAllStoriesFlat,
@@ -195,9 +196,11 @@ watch(
 
 function storyLink(story) {
   const geo = story.geo || null;
-  const lat = geo?.lat ?? settings.MAP.position.lat;
-  const lng = geo?.lng ?? settings.MAP.position.lng;
-  const zoom = geo?.lat != null && geo?.lng != null ? 18 : settings.MAP.zoom;
+  const hasGeo =
+    geo?.lat != null &&
+    geo?.lng != null &&
+    Number.isFinite(Number(geo.lat)) &&
+    Number.isFinite(Number(geo.lng));
   // Stories always point to historical data, which is only available in `remote`.
   const provider = "remote";
   const suggestedType = preferredUnitByStoryIcon(story?.iconId);
@@ -213,9 +216,7 @@ function storyLink(story) {
       type,
       ...(derivedDay ? { date: derivedDay } : {}),
       ...(ts != null ? { timestamp: String(ts) } : {}),
-      zoom,
-      lat,
-      lng,
+      ...(hasGeo ? { zoom: getMapAddressZoom(), lat: geo.lat, lng: geo.lng } : {}),
       sensor: story.sensorId,
     },
   };

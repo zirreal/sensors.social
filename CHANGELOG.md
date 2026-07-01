@@ -30,7 +30,17 @@ If a sensor moved during the period you are viewing (day, week, or month), the t
 
 **Share a sensor page on social media or in messages with richer link previews.**
 
-The page title includes the sensor’s address (or a short device ID), and the description names the measurement type you are viewing.
+Sensor share links now go through **[share.sensors.social](https://share.sensors.social)** — a small OG preview service for bots (Telegram, Facebook, X, and similar). People who open the link are redirected to the main map as before.
+
+Example:
+
+`https://share.sensors.social?sensor=aa4bdc6c…&type=temperature&provider=remote&date=2026-06-24`
+
+For crawlers, the preview is built from real sensor data — geo from the markers API and day logs, then reverse geocoding — not from `lat`/`lng` in the URL. The title looks like **“Air quality at {address} — …”** (or a short sensor ID while the address loads). The description names the measurement type, provider, and date when you share a specific layer.
+
+In the app, the popup header shows **Sensor {id}** / **Сенсор {id}** until the address is resolved, instead of a wrong or placeholder location.
+
+The **Share** tab copies links with `share.sensors.social` when a concrete `sensor=` is included (`SHARE_URL` in config).
 
 ### Removed old export
 
@@ -42,6 +52,9 @@ The old export was not very useful it was global and hard to use.
 
 - Fix: Address cashed and didn't changed after geo changing
 - Feat: RosMan v2 migration
+- Feat: `services/share-og` — OG HTML for share.sensors.social (deploy separately on VPS)
+- Feat: 5-minute IndexedDB cache for markers list, maxdata, and Day chart logs (fewer repeat API calls on reload)
+- Feat: Map default view without regional `MAP.position` fallback (`defaultView.js`, zoom from `GEOCODER.zoom.address`)
 - Refactor: API requests reduced
 - Refactor: IndexedDB rebuilt structure for better functionallity. Accounts, Sensors was retouched.
 

@@ -327,9 +327,6 @@ function getSensorLink(sensor) {
     query: {
       provider: "remote",
       type: config.MAP.measure,
-      zoom: config.MAP.zoom,
-      lat: config.MAP.position.lat,
-      lng: config.MAP.position.lng,
       sensor: sensor,
     },
   };

@@ -36,6 +36,7 @@ import {
 } from "../utils/map/sensors/requests";
 import { hasValidCoordinates } from "../utils/utils";
 import { dayISO, timelineFetchBounds } from "@/utils/date";
+import { getMapAddressZoom } from "@/utils/map/defaultView";
 import { loadLogsHealth } from "../utils/calculations/sensor/logs_health.js";
 
 import {
@@ -790,13 +791,6 @@ export function useSensors() {
     if (!hasValidCoordinates(geo) && sameSensor && hasValidCoordinates(prev?.geo)) {
       geo = prev.geo;
     }
-    if (!hasValidCoordinates(geo) && route.query.lat != null && route.query.lng != null) {
-      const lat = parseFloat(route.query.lat);
-      const lng = parseFloat(route.query.lng);
-      if (Number.isFinite(lat) && Number.isFinite(lng)) {
-        geo = { lat, lng };
-      }
-    }
 
     const isRealtimeTimeline =
       mapState.currentProvider.value === "realtime" &&
@@ -814,7 +808,7 @@ export function useSensors() {
     mapState.mapinactive.value = true;
     const shell = formatPointForSensor({
       sensor_id: sid,
-      geo: geo || { lat: 0, lng: 0 },
+      geo: hasValidCoordinates(geo) ? geo : null,
       model: rawPoint?.model || prev?.model || DEFAULT_SENSOR_MODEL,
       device_model: rawPoint?.device_model ?? prev?.device_model ?? null,
       owner:
@@ -924,7 +918,12 @@ export function useSensors() {
     if (ownerKey) {
       point.owner = ownerKey;
       if (!point.ownerSensorsWithData?.length) {
-        const ids = await ensureOwnerSensorIds({ ...point, owner: ownerKey }, ownerKey);
+        const ids = await ensureOwnerSensorIds(
+          { ...point, owner: ownerKey },
+          ownerKey,
+          null,
+          sensors.value
+        );
         const fullBundle = await buildOwnerSensorsWithDataAsync(
           { ...point, owner: ownerKey, ownerSensorIds: ids },
           sensors.value,
@@ -1559,7 +1558,7 @@ export function useSensors() {
     }
     if (normalizeOwnerKey(sensorPoint.value)) {
       rebundleOwnerClusterForPoint(sensorPoint.value);
-    } else {
+    } else if (hasValidCoordinates(sensorPoint.value.geo)) {
       updateSensorMarker(sensorPoint.value);
       setActiveMarker(resolveOwnerClusterMarkerId(sensorPoint.value.sensor_id));
     }
@@ -1829,7 +1828,7 @@ export function useSensors() {
   };
 
   /**
-   * Load owner device list from api/sensor/sensors/{owner} for SensorPicker and map cluster.
+   * Load owner device ids for SensorPicker and map cluster (map list + v2 meta, no owner API).
    * Owner comes from the point or URL (?owner=); DIY sensors skip this (no owner).
    * @param {string} sensorId - Open popup sensor id
    * @param {number} [session=popupSessionId] - Popup session guard
@@ -1844,7 +1843,9 @@ export function useSensors() {
 
     const ids = await ensureOwnerSensorIds(
       { ...(point || {}), sensor_id: sid, owner: ownerKey },
-      ownerKey
+      ownerKey,
+      null,
+      sensors.value
     );
     if (session !== popupSessionId || !isSensorOpen(sid)) return;
 
@@ -1942,7 +1943,11 @@ export function useSensors() {
       const { sensors: sensorsData, sensorsNoLocation: sensorsNoLocationData } = await getSensors(
         start,
         end,
-        mapState.currentProvider.value
+        mapState.currentProvider.value,
+        {
+          isoDate: mapState.currentDate.value,
+          timelineMode,
+        }
       );
 
       // Drop result if a newer request superseded this one
@@ -2046,7 +2051,7 @@ export function useSensors() {
     mapState.setMapSettings(route, router, {
       lat: point?.geo?.lat ?? route.query.lat,
       lng: point?.geo?.lng ?? route.query.lng,
-      zoom: route.query.zoom ?? 18,
+      zoom: route.query.zoom ?? getMapAddressZoom(),
       sensor: next,
       owner: nextOwner ? String(nextOwner) : undefined,
     });

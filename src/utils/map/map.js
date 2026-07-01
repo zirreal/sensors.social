@@ -5,6 +5,7 @@ import "leaflet/dist/leaflet.css";
 
 import { settings, themes } from "@config";
 import { isDarkMapThemeEnabled } from "./themeScheme";
+import { getDefaultMapView } from "./defaultView";
 
 let map;
 let usermarker;
@@ -111,12 +112,9 @@ export function init(position, zoom, theme = "light") {
   map.attributionControl.remove();
   map.zoomControl.remove();
 
-  const cfgLat = n(settings?.MAP?.position?.lat, 0);
-  const cfgLng = n(settings?.MAP?.position?.lng, 0);
-  const cfgZoom = n(settings?.MAP?.zoom, 3);
-
-  const safeCenter = position ?? [cfgLat, cfgLng];
-  const safeZoom = n(zoom, cfgZoom);
+  const defaultView = getDefaultMapView();
+  const safeCenter = position ?? [defaultView.lat, defaultView.lng];
+  const safeZoom = n(zoom, defaultView.zoom);
 
   map.setView(safeCenter, safeZoom);
 
@@ -274,8 +272,7 @@ function getBoundsFromConfigOrNull() {
   const hasDLat = hasFiniteNumber(d?.lat) || typeof d === "number";
   const hasDLng = hasFiniteNumber(d?.lng) || typeof d === "number";
   if (d !== undefined && hasDLat && hasDLng) {
-    const lat = n(settings?.MAP?.position?.lat, 0);
-    const lng = n(settings?.MAP?.position?.lng, 0);
+    const { lat, lng } = getDefaultMapView();
     const dLat = n(typeof d === "number" ? d : d?.lat, 0.5);
     const dLng = n(typeof d === "number" ? d : d?.lng, 0.5);
     return L.latLngBounds([lat - dLat, lng - dLng], [lat + dLat, lng + dLng]);
@@ -432,16 +429,18 @@ export function getConfigBounds(config) {
   }
 
   // Создаем границы на основе центра карты и boundsDelta
-  const centerLat = Number(config?.MAP?.position?.lat || 0);
-  const centerLng = Number(config?.MAP?.position?.lng || 0);
+  const centerLat = Number(config?.MAP?.position?.lat);
+  const centerLng = Number(config?.MAP?.position?.lng);
+  const lat = Number.isFinite(centerLat) ? centerLat : 0;
+  const lng = Number.isFinite(centerLng) ? centerLng : 0;
   const deltaLat = Number(boundsDelta.lat);
   const deltaLng = Number(boundsDelta.lng);
 
   return {
-    north: centerLat + deltaLat / 2,
-    south: centerLat - deltaLat / 2,
-    east: centerLng + deltaLng / 2,
-    west: centerLng - deltaLng / 2,
+    north: lat + deltaLat / 2,
+    south: lat - deltaLat / 2,
+    east: lng + deltaLng / 2,
+    west: lng - deltaLng / 2,
   };
 }
 

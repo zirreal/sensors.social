@@ -21,6 +21,7 @@
 import { computed, onMounted, onUnmounted } from "vue";
 import { useRouter, useRoute } from "vue-router";
 import { useBookmarks, removeBookmarkById, isLegacyBookmarkRecord } from "@/composables/useBookmarks";
+import { getMapAddressZoom } from "@/utils/map/defaultView";
 import { idbschemas } from "@config";
 
 const schema = idbschemas?.Sensors;
@@ -42,7 +43,7 @@ function getlink(bookmark) {
   if (!isLegacyBookmarkRecord(bookmark) && bookmark.lat != null && bookmark.lng != null) {
     query.lat = String(bookmark.lat);
     query.lng = String(bookmark.lng);
-    query.zoom = query.zoom || "18";
+    query.zoom = query.zoom || String(getMapAddressZoom());
     if (bookmark.owner) {
       query.owner = bookmark.owner;
     } else {

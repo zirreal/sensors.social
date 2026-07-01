@@ -55,6 +55,7 @@ import {
   collectOwnerDeviceIds,
 } from "../utils/map/sensors/requests";
 import { hasValidCoordinates } from "../utils/utils";
+import { getDefaultMapView, getMapAddressZoom } from "@/utils/map/defaultView";
 import { useSensors } from "../composables/useSensors";
 import { useMessages } from "../composables/useMessages";
 import { useSensorPageMeta, SENSOR_PAGE_META_KEY } from "../composables/useSensorPageMeta";
@@ -107,12 +108,9 @@ const sensorLog = computed(() =>
   Array.isArray(sensorPoint.value?.logs) ? sensorPoint.value.logs : null
 );
 
-const sensorGeo = computed(() => sensorPoint.value?.geo ?? null);
-
 const { logGeoAddresses, pageTitle, pageDescription } = useSensorPageMeta(
   activeSensorId,
   sensorLog,
-  sensorGeo,
   () => sensorPoint.value,
   () => route.query,
   mapState,
@@ -123,6 +121,17 @@ provide(LOG_GEO_ADDRESSES_KEY, logGeoAddresses);
 provide(SENSOR_PAGE_META_KEY, { pageTitle, pageDescription });
 
 const sensorsList = () => (Array.isArray(sensors.value) ? sensors.value : []);
+
+/** Deep-link popup shell — geo/address come from readings API, not URL or stale map rows. */
+const pointFromSensorQuery = (sensorId, fullSensorData, query) =>
+  formatPointForSensor({
+    sensor_id: sensorId,
+    owner: fullSensorData?.owner ?? (query.owner ? String(query.owner) : null),
+    device_model: fullSensorData?.device_model ?? null,
+    model: fullSensorData?.model,
+    maxdata: fullSensorData?.maxdata,
+    data: fullSensorData?.data,
+  });
 
 /** Shell device for `?owner=` without `sensor=` — does not affect picker bundle (full list). */
 const pickOwnerShellSensorId = async (owner, lat, lng) => {
@@ -199,7 +208,7 @@ const handleSensorClick = (data) => {
   const mapClickQuery = {
     lat: point.geo?.lat || route.query.lat,
     lng: point.geo?.lng || route.query.lng,
-    zoom: hasValidCoordinates(point.geo) ? 18 : 3,
+    zoom: hasValidCoordinates(point.geo) ? getMapAddressZoom() : getDefaultMapView().zoom,
   };
 
   if (point.owner) {
@@ -224,7 +233,7 @@ const handleMessageClick = (data) => {
   mapState.setMapSettings(route, router, {
     lat: data.geo?.lat || route.query.lat,
     lng: data.geo?.lng || route.query.lng,
-    zoom: hasValidCoordinates(data.geo) ? 18 : 3,
+    zoom: hasValidCoordinates(data.geo) ? getMapAddressZoom() : getDefaultMapView().zoom,
     message: data.message_id,
   });
 };
@@ -469,12 +478,7 @@ watch(
       if (shellSensorId) {
         commitPopupShell({
           sensor_id: shellSensorId,
-          geo: sensorPoint.value?.geo || {
-            lat: parseFloat(route.query.lat),
-            lng: parseFloat(route.query.lng),
-          },
           owner: route.query.owner || sensorPoint.value?.owner || null,
-          address: sensorPoint.value?.address || null,
         });
       }
 
@@ -501,16 +505,7 @@ watch(
           route.query.sensor || ownerDefaultId || sensorPoint.value?.sensor_id;
         if (liveSensorId) {
           const fullSensorData = sensorsList().find((s) => s.sensor_id === liveSensorId);
-          const existingAddress = sensorPoint.value?.address;
-          const point = formatPointForSensor(
-            fullSensorData || {
-              sensor_id: liveSensorId,
-              geo: { lat: parseFloat(route.query.lat), lng: parseFloat(route.query.lng) },
-              owner: route.query.owner ? String(route.query.owner) : null,
-              address: existingAddress || null,
-            }
-          );
-          updateSensorPopup(point);
+          updateSensorPopup(pointFromSensorQuery(liveSensorId, fullSensorData, route.query));
         }
       });
       return; // Останавливаем выполнение watcher после перезагрузки данных
@@ -521,16 +516,7 @@ watch(
     // must open the popup from URL in realtime mode.
     if (newQuery.sensor && (sensorChanged || !oldQuery)) {
       const fullSensorData = sensorsList().find((s) => s.sensor_id === newQuery.sensor);
-      const existingAddress = sensorPoint.value?.address;
-      const point = formatPointForSensor(
-        fullSensorData || {
-          sensor_id: newQuery.sensor,
-          geo: { lat: parseFloat(newQuery.lat), lng: parseFloat(newQuery.lng) },
-          owner: newQuery.owner ? String(newQuery.owner) : null,
-          address: existingAddress || null,
-        }
-      );
-      updateSensorPopup(point);
+      updateSensorPopup(pointFromSensorQuery(newQuery.sensor, fullSensorData, newQuery));
     }
 
     // Deep link: `?owner=` without `sensor=` — popup with full owner device list.

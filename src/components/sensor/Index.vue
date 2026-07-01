@@ -17,7 +17,7 @@
         <h3 class="sensor-header__address">
           <template v-if="hasAddress">{{ displayAddress }}</template>
           <span v-else-if="isAddressLoading" class="sensor-header__address-skeleton" aria-hidden="true"></span>
-          <span v-else class="sensor-header__address-skeleton" aria-hidden="true"></span>
+          <span v-else class="sensor-header__address-missing">{{ headerFallbackLabel }}</span>
         </h3>
       </div>
 
@@ -62,7 +62,8 @@
 
         <div class="text-small sensor-header__address">
           <template v-if="hasAddress">{{ displayAddress }}</template>
-          <span v-else class="sensor-header__address-skeleton sensor-header__address-skeleton--sub" aria-hidden="true"></span>
+          <span v-else-if="isAddressLoading" class="sensor-header__address-skeleton sensor-header__address-skeleton--sub" aria-hidden="true"></span>
+          <span v-else class="sensor-header__address-missing sensor-header__address-missing--sub">{{ headerFallbackLabel }}</span>
         </div>
       </div>
 
@@ -81,7 +82,8 @@
 
         <div class="text-small sensor-header__address">
           <template v-if="hasAddress">{{ displayAddress }}</template>
-          <span v-else class="sensor-header__address-skeleton sensor-header__address-skeleton--sub" aria-hidden="true"></span>
+          <span v-else-if="isAddressLoading" class="sensor-header__address-skeleton sensor-header__address-skeleton--sub" aria-hidden="true"></span>
+          <span v-else class="sensor-header__address-missing sensor-header__address-missing--sub">{{ headerFallbackLabel }}</span>
         </div>
       </div>
 
@@ -196,7 +198,7 @@
 import { computed, ref, watch, onMounted, onBeforeUnmount, inject } from "vue";
 import { useI18n } from "vue-i18n";
 import { useMap } from "@/composables/useMap";
-import { useSensors, isSensorAddressReady } from "@/composables/useSensors";
+import { useSensors, isSensorAddressReady, formatSensorIdShort } from "@/composables/useSensors";
 import { useLogGeoAddresses, LOG_GEO_ADDRESSES_KEY } from "@/composables/useLogGeoAddresses";
 import { getStoriesForSensor, isStoryHidden, storiesLocalKeys } from "@/composables/useStories";
 import { useSensorBookmark } from "@/composables/useBookmarks";
@@ -225,12 +227,17 @@ const point = computed(() => props.point?.value ?? props.point ?? null);
 const log = computed(() => (Array.isArray(point.value?.logs) ? point.value.logs : null));
 
 const injectedGeoAddresses = inject(LOG_GEO_ADDRESSES_KEY, null);
+const sensorGeo = computed(() => point.value?.geo ?? null);
 const logGeoAddresses =
   injectedGeoAddresses ??
-  useLogGeoAddresses(log, localeComputed, () => point.value?.geo);
+  useLogGeoAddresses(log, localeComputed, sensorGeo);
 
 const displayAddress = computed(() => logGeoAddresses.headerAddress.value);
 const hasAddress = computed(() => isSensorAddressReady(displayAddress.value));
+const headerFallbackLabel = computed(() => {
+  const id = formatSensorIdShort(point.value?.sensor_id);
+  return id ? t("sensorpopup.sensorIdHeader", { id }) : "";
+});
 const isAddressLoading = computed(
   () => logGeoAddresses.loading.value && !displayAddress.value
 );
@@ -537,6 +544,17 @@ watch(
 .sensor-header__address-skeleton--sub {
   width: min(100%, 14rem);
   height: 1em;
+}
+
+.sensor-header__address-missing {
+  display: block;
+  color: var(--color-text-muted, #888);
+  font-weight: normal;
+  font-style: italic;
+}
+
+.sensor-header__address-missing--sub {
+  font-size: inherit;
 }
 
 .sensor-header .title-bookmark-add {

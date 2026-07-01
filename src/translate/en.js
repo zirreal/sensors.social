@@ -25,6 +25,8 @@ export default {
   "sensorpopup.deletebookmark": "Delete bookmark",
   "sensorpopup.infosensorid": "Sensor id",
   "sensorpopup.infosensorgeo": "Sensor geoposition",
+  "sensorpopup.geoNotFound": "Location not found",
+  "sensorpopup.sensorIdHeader": "Sensor {id}",
   "sensorpopup.infosensorowner": "Sensor owner",
   "sensorpopup.sharedefault": "Share this sensor",
   "sensorpopup.sharelink": "Copy the link of sensor",

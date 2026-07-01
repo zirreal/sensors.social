@@ -5,9 +5,8 @@
 import L from "leaflet";
 import "leaflet.markercluster";
 import "leaflet.markercluster/dist/MarkerCluster.css";
-import { getMapContext } from "./map";
-// import { findMarker } from "./sensors"; // Удаляем импорт, создаем универсальную версию
-import { moveMap } from "./map";
+import { getMapContext, moveMap } from "./map";
+import { getMapAddressZoom } from "./defaultView";
 
 /**
  * CSS classes for markers
@@ -233,7 +232,7 @@ export function attachClusterEvents(layer, clickHandler) {
  */
 function centerMapOnMarker(marker) {
   const coords = marker.getLatLng();
-  const zoom = 18; // Зум для сенсоров
+  const zoom = getMapAddressZoom();
   moveMap(coords, zoom, { popup: true, setZoom: true });
 }
 

@@ -11,6 +11,19 @@ export const SENSOR_PAGE_META_KEY = Symbol("sensorPageMeta");
 
 const UI_MESSAGES = { en, ru };
 
+/** Title lead-in for sensor share / OG previews (English; "at" fits street, city, and country). */
+export function sensorShareTitleLead(placeLabel) {
+  const place = String(placeLabel || "").trim();
+  if (!place) return "Air quality";
+  return `Air quality at ${place}`;
+}
+
+/** @param {{ address?: string|null, sensorId: string, suffix: string }} opts */
+export function buildSensorShareTitle({ address, sensorId, suffix }) {
+  const place = address || formatSensorIdShort(sensorId);
+  return `${sensorShareTitleLead(place)} — ${suffix}`;
+}
+
 function measurementTypeLabel(unitKey, locale) {
   const key = String(unitKey || "").toLowerCase();
   const groupKey = MEASUREMENT_GROUP_LOOKUP[key];
@@ -44,7 +57,6 @@ function sensorMetaTitleSuffix(point, log) {
  * Page title / description for MetaInfo when a sensor popup is open.
  * @param {import('vue').MaybeRefOrGetter<string>} sensorIdSource
  * @param {import('vue').MaybeRefOrGetter<Array|null>} sensorLogSource
- * @param {import('vue').MaybeRefOrGetter<object|null>} sensorGeoSource
  * @param {import('vue').MaybeRefOrGetter<object|null>} sensorPointSource
  * @param {import('vue').MaybeRefOrGetter<object>} routeQuerySource
  * @param {ReturnType<import('@/composables/useMap').useMap>} mapState
@@ -53,13 +65,14 @@ function sensorMetaTitleSuffix(point, log) {
 export function useSensorPageMeta(
   sensorIdSource,
   sensorLogSource,
-  sensorGeoSource,
   sensorPointSource,
   routeQuerySource,
   mapState,
   localeSource
 ) {
-  const logGeoAddresses = useLogGeoAddresses(sensorLogSource, localeSource, sensorGeoSource);
+  const sensorGeo = computed(() => toValue(sensorPointSource)?.geo ?? null);
+
+  const logGeoAddresses = useLogGeoAddresses(sensorLogSource, localeSource, sensorGeo);
 
   const pageTitle = computed(() => {
     const sensorId = String(toValue(sensorIdSource) || "").trim();
@@ -68,9 +81,8 @@ export function useSensorPageMeta(
     }
 
     const address = logGeoAddresses.headerAddress.value;
-    const label = address || formatSensorIdShort(sensorId);
     const suffix = sensorMetaTitleSuffix(toValue(sensorPointSource), toValue(sensorLogSource));
-    return `${label} — ${suffix}`;
+    return buildSensorShareTitle({ address, sensorId, suffix });
   });
 
   const pageDescription = computed(() => {
@@ -79,15 +91,28 @@ export function useSensorPageMeta(
       return settings?.DESC || null;
     }
 
+    const sid = formatSensorIdShort(sensorId);
+    const address = logGeoAddresses.headerAddress.value;
+    if (!address) return null;
+
     const query = toValue(routeQuerySource) || {};
     const locale = toValue(localeSource) || "en";
-    const sid = formatSensorIdShort(sensorId);
-    const address = logGeoAddresses.headerAddress.value || "sensor location";
+    const hasType = Boolean(query.type);
+
+    const provider = query.provider || mapState.currentProvider.value || "remote";
+
+    if (!hasType) {
+      if (provider === "realtime") {
+        return `Air quality measurements from sensor ${sid} at ${address}.`;
+      }
+      const date = query.date || mapState.currentDate.value || null;
+      return `Air quality measurements from sensor ${sid} at ${address}${
+        date ? ` on ${date}` : ""
+      }.`;
+    }
 
     const unitKey = String(query.type || mapState.currentUnit.value || "pm25").toLowerCase();
     const typeName = measurementTypeLabel(unitKey, locale);
-
-    const provider = query.provider || mapState.currentProvider.value || "remote";
     if (provider === "realtime") {
       return `Real-time ${typeName} measurements from sensor ${sid} at ${address}.`;
     }
