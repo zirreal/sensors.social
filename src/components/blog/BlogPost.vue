@@ -168,13 +168,23 @@ watch(
 
 <style>
 /* Keep very tall infographic-like images on screen without scrolling */
-.blog-post__content img[src$="waterfall-party.webp"] {
+.blog-post__content img[src$="waterfall-party.webp"],
+.blog-post__content img[src$="what-are-we-really-breathing/images/2.webp"] {
   width: 100%;
   max-height: 80vh;
   object-fit: contain;
   display: block;
   margin-inline: auto;
+  border: none;
 }
+
+/* .blog-post__content img[src$="what-are-we-really-breathing/images/2.webp"] {
+    width: 100%;
+    max-height: 80vh;
+    object-fit: contain;
+    display: block;
+    margin-inline: auto;
+} */
 
 .blog-post__content a > img {
   cursor: pointer;
