@@ -103,13 +103,16 @@ async function translateWithOpenAI(text, targetLang, cache, kind = "md") {
   if (cache[cacheKey]) return cache[cacheKey];
 
   const response = await openai.chat.completions.create({
-    model: "gpt-4",
+    model: "gpt-4o",
+    max_tokens: 8192,
     messages: [
       {
         role: "system",
         content:
           `You are a professional translator. Translate to ${targetLang}. ` +
           `Preserve meaning and tone. If input is Markdown, preserve Markdown syntax, links, and code blocks. ` +
+          `Do not translate URLs, image paths, HTML/Vue component tags, or attribute names. ` +
+          `Keep component tags like <InstagramEmbed ... /> intact. ` +
           `Return only the translation.`,
       },
       { role: "user", content: text },
@@ -120,6 +123,75 @@ async function translateWithOpenAI(text, targetLang, cache, kind = "md") {
   cache[cacheKey] = translated;
   saveCache(cache);
   return translated;
+}
+
+/** Split markdown into chunks so long posts don't hit model output limits. */
+function splitMarkdownBody(body, maxChars = 3500) {
+  const normalized = body.replace(/\r\n/g, "\n").trim();
+  if (!normalized) return [];
+  if (normalized.length <= maxChars) return [normalized];
+
+  // Prefer splitting on H2 sections, then H3, then blank-line paragraphs.
+  const headingSplit = normalized.split(/(?=^##\s)/m).filter((p) => p.trim());
+  const pieces =
+    headingSplit.length > 1
+      ? headingSplit
+      : normalized.split(/(?=^###\s)/m).filter((p) => p.trim());
+
+  const chunks = [];
+  let current = "";
+
+  const flush = () => {
+    if (current.trim()) chunks.push(current.trim());
+    current = "";
+  };
+
+  for (const piece of pieces) {
+    const part = piece.trim();
+    if (!part) continue;
+
+    if (part.length > maxChars) {
+      flush();
+      const paras = part.split(/\n{2,}/);
+      let buf = "";
+      for (const para of paras) {
+        const next = buf ? `${buf}\n\n${para}` : para;
+        if (next.length > maxChars && buf) {
+          chunks.push(buf.trim());
+          buf = para;
+        } else {
+          buf = next;
+        }
+      }
+      if (buf.trim()) chunks.push(buf.trim());
+      continue;
+    }
+
+    const next = current ? `${current}\n\n${part}` : part;
+    if (next.length > maxChars && current) {
+      flush();
+      current = part;
+    } else {
+      current = next;
+    }
+  }
+
+  flush();
+  return chunks;
+}
+
+async function translateMarkdownBody(body, targetLang, cache) {
+  const chunks = splitMarkdownBody(body);
+  if (!chunks.length) return "";
+
+  const translated = [];
+  for (let i = 0; i < chunks.length; i++) {
+    const chunk = chunks[i];
+    console.log(`  ↪ body chunk ${i + 1}/${chunks.length} (${chunk.length} chars)`);
+    translated.push(await translateWithOpenAI(chunk, targetLang, cache, `md:body:${i}`));
+  }
+
+  return translated.join("\n\n");
 }
 
 async function run() {
@@ -156,9 +228,9 @@ async function run() {
         console.log(`✅ [${lang}] ${path.relative(process.cwd(), file)} ${k}`);
       }
 
-      // translate body markdown
+      // translate body markdown (chunked for long posts)
       const bodyTranslated = body.trim()
-        ? await translateWithOpenAI(body, lang, cache, "md:body")
+        ? await translateMarkdownBody(body, lang, cache)
         : "";
 
       const out = serializeFrontmatter(outFm) + "\n" + bodyTranslated.trim() + "\n";
