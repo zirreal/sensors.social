@@ -87,29 +87,31 @@
 
 <script setup>
 import { ref, onMounted, watch } from "vue";
-import { useAccounts } from "@/composables/useAccounts"; // TODO: раскомментировать когда будет нужно
+import { useAccounts } from "@/composables/useAccounts";
 import config from "@/config/default/config.json";
 import Copy from "@/components/controls/Copy.vue";
 import { generateAvatar } from "@/utils/avatarGenerator";
-// import { getTypeProvider } from "@/utils/utils"; // deprecated
 
-const accountStore = useAccounts(); // TODO: раскомментировать когда будет нужно
+const accountStore = useAccounts();
 const accounts = ref([]);
 const isReady = ref(false);
 const avatarsByAddr = ref({});
-
-// TODO: раскомментировать когда будет нужно
 
 // Загружаем все аккаунты из БД/стора и подгружаем сенсоры
 async function loadAccounts() {
   isReady.value = false;
   const stored = await accountStore.getAccounts();
 
-  accounts.value = stored.map((acc) => ({
-    ...acc,
-    sensors: [],
-    sensorsLoading: false,
-  }));
+  accounts.value = await Promise.all(
+    stored.map(async (acc) => {
+      const sensors = await accountStore.getUserSensors(acc.address);
+      return {
+        ...acc,
+        sensors,
+        sensorsLoading: false,
+      };
+    })
+  );
 
   // Prefetch identicons for nicer UI
   try {
@@ -179,7 +181,7 @@ async function onSensorsToggle(acc, event) {
   }
 }
 
-onMounted(loadAccounts); // TODO: раскомментировать когда будет нужно
+onMounted(loadAccounts);
 
 // Keep header state in sync with log in/out happening elsewhere (e.g. Login page)
 watch(

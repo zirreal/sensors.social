@@ -27,6 +27,8 @@ export default {
   "sensorpopup.infosensorgeo": "Sensor geoposition",
   "sensorpopup.geoNotFound": "Location not found",
   "sensorpopup.sensorIdHeader": "Sensor {id}",
+  "sensorpopup.encrypted_login_notice": "Some measurements are encrypted. Log in as the sensor owner to view them.",
+  "sensorpopup.encrypted_decrypt_pending": "Decrypting encrypted measurements…",
   "sensorpopup.infosensorowner": "Sensor owner",
   "sensorpopup.sharedefault": "Share this sensor",
   "sensorpopup.sharelink": "Copy the link of sensor",
@@ -498,7 +500,9 @@ export default {
   "Power and connection": "Power and connection",
   "E-ink display": "E-ink display",
   "UV Cover installation": "UV Cover installation",
-  "Add an account using your 12-word seed phrase. “Keep me signed” stores it on this device.": "Add an account using your 12-word seed phrase. “Keep me signed” stores it on this device.",
+  "Add an account using your 12-word seed phrase, or import a self-owner JSON from the device. “Keep me signed” stores it on this device.":
+    "Add an account using your 12-word seed phrase, or import a self-owner JSON from the device. “Keep me signed” stores it on this device.",
+  "Sign in": "Sign in",
   "Signed in": "Signed in",
   "on this device": "on this device",
   "Add account": "Add account",
@@ -511,6 +515,13 @@ export default {
   "You are signing in as": "You are signing in as",
   "Type (advanced):": "Type (advanced):",
   "Keep me signed in (I trust this device)": "Keep me signed in (I trust this device)",
+  "Or import self-owner JSON from the device": "Or import self-owner JSON from the device",
+  "Import owner access JSON": "Import owner access JSON",
+  "login.owner_json_warning":
+    "Owner access JSON works only for self-owner devices and unlocks that device’s encrypted data. If you are a manual owner, use the 12-word seed phrase above instead.",
+  "login.not_self_owner_json":
+    "This JSON is not from a self-owner device. Please sign in with your 12-word seed phrase instead.",
+  "Cannot import owner access JSON": "Cannot import owner access JSON",
   "Signed in as": "Signed in as",
   "center-on-user": "center-on-user",
   "Manage accounts": "Manage accounts",

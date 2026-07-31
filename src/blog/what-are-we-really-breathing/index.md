@@ -105,7 +105,7 @@ A single number shows the air quality at one specific moment.
 
 <InstagramEmbed url="https://www.instagram.com/reel/DakvTk2AF09/?utm_source=ig_web_copy_link&igsh=MzRlODBiNWFlZA==" />
 
-![Environment data](./images/2.webp)
+![Environment data](./images/2-vertical.webp)
 
 ### Why Air Quality Can Change from One Street to Another
 
@@ -185,7 +185,7 @@ When did the event begin?
 
 This is why measurement history is often far more valuable than a single PM reading. It helps reveal the full story of an environmental event, rather than just capturing one moment in time.
 
-[![Cyprus Saharan Dust Storm](./images/6.webp)](https://x.com/SensorsSocial/status/2040375444797591705)
+[![Cyprus Saharan Dust Storm](./images/6-vertical.webp)](https://x.com/SensorsSocial/status/2040375444797591705)
 
 ![Better look at storm](./images/7.webp)
 

@@ -32,7 +32,10 @@ export function sortMapLayerUnits(units) {
 }
 
 export function toFixed(num, dec = 4) {
-  return +(+num || 0).toFixed(dec);
+  if (typeof num === "string" && num.startsWith("e.")) return num;
+  const n = Number(num);
+  if (!Number.isFinite(n)) return null;
+  return +n.toFixed(dec);
 }
 export function converterPpmToMgm3(v, molecularWeight) {
   return toFixed((v * molecularWeight) / 24.05526);

@@ -403,7 +403,7 @@ function buildOwnerBundleFromV2Meta(point, sensorsList, clusterBundle = true) {
 }
 
 /**
- * Resolve owner device ids without `api/sensor/sensors/{owner}`
+ * Resolve owner device ids without Roseman owner-list API.
  * Order: explicit/cache → map markers list → v2 sensor meta preload.
  */
 export async function ensureOwnerSensorIds(

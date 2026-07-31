@@ -78,6 +78,7 @@ Highcharts.setOptions({
 
 const props = defineProps({
   log: { type: Array, default: () => [] },
+  logRevision: { type: [String, Number], default: "" },
   geoAddresses: { type: Object, default: () => ({}) },
   showGeoInTooltip: { type: Boolean, default: false },
   addressForTimestamp: { type: Function, default: null },
@@ -746,10 +747,12 @@ const updateChart = async (log, legendKey = null) => {
 
 // Cache series per (legendKey, logSignature) to speed up tab switches
 const seriesCache = new Map();
-function getLogSignature(log) {
-  if (!Array.isArray(log) || log.length === 0) return "0-0";
+function getLogSignature(log, revision = "") {
+  if (!Array.isArray(log) || log.length === 0) return `0-0-${revision}`;
   const lastTs = log[log.length - 1]?.timestamp || 0;
-  return `${log.length}-${lastTs}`;
+  const rev = revision === "" || revision == null ? "" : String(revision);
+  if (!rev) return `${log.length}-${lastTs}`;
+  return `${log.length}-${lastTs}-${rev}`;
 }
 
 /**
@@ -766,7 +769,7 @@ function buildSeriesArray(log, legendKey) {
   // Try cache first
   const cacheKey = `${legendKey}|${mapState.timelineMode.value}|${
     mapState.currentDate.value
-  }|${getLogSignature(log)}`;
+  }|${getLogSignature(log, props.logRevision)}`;
   const cached = seriesCache.get(cacheKey);
   if (cached) return cached;
 
@@ -1153,13 +1156,14 @@ function onLegendClick(legendKey) {
 watch(
   [
     () => safeLog.value,
+    () => props.logRevision,
     () => activeLegendKey.value,
     () => mapState.timelineMode.value,
     () => mapState.currentDate.value,
   ],
   async (
-    [log, legendKey, timelineMode, currentDate],
-    [oldLog, oldLegendKey, oldTimelineMode, oldCurrentDate]
+    [log, logRevision, legendKey, timelineMode, currentDate],
+    [oldLog, oldLogRevision, oldLegendKey, oldTimelineMode, oldCurrentDate]
   ) => {
     if (!chartRef.value || isUpdatingChart.value) return;
 
@@ -1167,10 +1171,11 @@ watch(
     if (
       timelineMode !== oldTimelineMode ||
       currentDate !== oldCurrentDate ||
-      legendKey !== oldLegendKey
+      legendKey !== oldLegendKey ||
+      logRevision !== oldLogRevision
     ) {
       clearChartInstantly();
-      if (timelineMode !== oldTimelineMode) {
+      if (timelineMode !== oldTimelineMode || logRevision !== oldLogRevision) {
         seriesCache.clear();
       }
     }
@@ -1187,10 +1192,14 @@ watch(
 
 // Realtime обновления при добавлении новых данных
 watch(
-  () => safeLog.value.length,
-  async (newLen, oldLen) => {
-    if (!isRealtime.value || newLen <= oldLen || !chartRef.value || isUpdatingChart.value) return;
+  [() => safeLog.value.length, () => props.logRevision],
+  async ([newLen, logRevision], [oldLen, oldLogRevision]) => {
+    if (!isRealtime.value || !chartRef.value || isUpdatingChart.value) return;
+    const lengthIncreased = newLen > oldLen;
+    const revisionChanged = logRevision !== oldLogRevision;
+    if (!lengthIncreased && !revisionChanged) return;
 
+    if (revisionChanged) seriesCache.clear();
     await updateChart(safeLog.value);
   }
 );

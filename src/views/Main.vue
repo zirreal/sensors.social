@@ -35,6 +35,7 @@ import { useRouter, useRoute } from "vue-router";
 import { useI18n } from "vue-i18n";
 
 import { useMap } from "@/composables/useMap";
+import { measurementBagHasEncryptedValues } from "@/utils/sensorValueCrypto";
 import { useAccounts } from "@/composables/useAccounts";
 
 import Header from "../components/header/Header.vue";
@@ -56,7 +57,7 @@ import {
 } from "../utils/map/sensors/requests";
 import { hasValidCoordinates } from "../utils/utils";
 import { getDefaultMapView, getMapAddressZoom } from "@/utils/map/defaultView";
-import { useSensors } from "../composables/useSensors";
+import { useSensors, redecryptDataBag, resolveOwnerAccount } from "../composables/useSensors";
 import { useMessages } from "../composables/useMessages";
 import { useSensorPageMeta, SENSOR_PAGE_META_KEY } from "../composables/useSensorPageMeta";
 import { LOG_GEO_ADDRESSES_KEY } from "../composables/useLogGeoAddresses";
@@ -243,13 +244,23 @@ let unwatchRealtime = null;
 
 // Callback для обработки realtime данных
 const onRealtimePoint = async (point) => {
-  // Обогащаем текущие данные точкой росы
+  let streamData = point.data;
+  const streamOwner = normalizeOwnerKey(point);
+  const sensorId = String(point?.sensor_id || "");
+  const ownerAccount = resolveOwnerAccount(
+    accountStore.accounts.value,
+    streamOwner,
+    sensorId
+  );
+  if (ownerAccount && measurementBagHasEncryptedValues(streamData)) {
+    streamData = await redecryptDataBag(sensorId, streamData, ownerAccount);
+  }
 
   // Обновляем данные для realtime
   setSensorData(point.sensor_id, {
     geo: point.geo,
     model: point.model,
-    data: point.data,
+    data: streamData,
     // Keep owner in local state so realtime can use owner-bundling like daily recap.
     owner: normalizeOwnerKey(point) || null,
     device_model: point.device_model || null,
@@ -276,10 +287,10 @@ const onRealtimePoint = async (point) => {
       .filter(Boolean);
     const ts = Number(point?.timestamp);
     const entry =
-      Number.isFinite(ts) && point?.data
+      Number.isFinite(ts) && streamData
         ? {
             timestamp: ts,
-            data: point.data,
+            data: streamData,
             ...(hasValidCoordinates(point?.geo) ? { geo: point.geo } : null),
           }
         : null;
@@ -313,7 +324,7 @@ const onRealtimePoint = async (point) => {
       model: point.model || prevPopup?.model,
       owner: nextPopupOwner,
       device_model: point.device_model || prevPopup?.device_model || null,
-      data: point.data,
+      data: streamData,
       logs: nextLogs,
       ...(ownerSensorsWithData?.length ? { ownerSensorsWithData } : null),
     };
