@@ -8,7 +8,7 @@
         <p class="subtitle">
           {{
             $t(
-              "Add an account using your 12-word seed phrase. “Keep me signed” stores it on this device."
+              "Add an account using your 12-word seed phrase, or import a self-owner JSON from the device. “Keep me signed” stores it on this device."
             )
           }}
         </p>
@@ -65,20 +65,20 @@
                 <span class="muted" v-if="sensorsLoadingByAddr[acc.address]">{{
                   $t("Loading…")
                 }}</span>
-                <span class="muted" v-else-if="(sensorsByAddr[acc.address] || []).length">
-                  {{ (sensorsByAddr[acc.address] || []).length }}
+                <span class="muted" v-else-if="accountSensors(acc).length">
+                  {{ accountSensors(acc).length }}
                 </span>
               </summary>
               <div class="pill-sensors-body">
                 <div v-if="sensorsLoadingByAddr[acc.address]" class="muted">
                   {{ $t("Loading sensors…") }}
                 </div>
-                <div v-else-if="(sensorsByAddr[acc.address] || []).length === 0" class="muted">
+                <div v-else-if="accountSensors(acc).length === 0" class="muted">
                   {{ $t("No sensors found for this account yet.") }}
                 </div>
                 <div v-else class="sensor-chips">
                   <router-link
-                    v-for="sensor in sensorsByAddr[acc.address]"
+                    v-for="sensor in accountSensors(acc)"
                     :key="sensor"
                     class="sensor-chip"
                     :to="getSensorLink(sensor)"
@@ -141,12 +141,34 @@
             </span>
           </label>
 
+          <div class="import-owner">
+            <div class="muted">{{ $t("Or import self-owner JSON from the device") }}</div>
+            <p class="import-owner-notice" role="note">
+              <font-awesome-icon
+                icon="fa-solid fa-circle-info"
+                class="import-owner-notice__icon"
+                aria-hidden="true"
+              />
+              <span>{{ $t("login.owner_json_warning") }}</span>
+            </p>
+            <input
+              ref="ownerJsonInput"
+              type="file"
+              accept="application/json,.json"
+              class="file-input"
+              @change="handleOwnerJsonImport"
+            />
+            <button class="button" type="button" @click.prevent="pickOwnerJson">
+              {{ $t("Import owner access JSON") }}
+            </button>
+          </div>
+
           <button
             class="button"
             :class="loginStatus === 'success' ? 'button-green' : null"
             :disabled="loginStatus === 'success'"
           >
-            {{ loginStatus === "success" ? "Signed in" : "Sign in" }}
+            {{ loginStatus === "success" ? $t("Signed in") : $t("Sign in") }}
           </button>
 
           <div v-if="loginStatus === 'success' && lastAddress" class="success">
@@ -166,7 +188,8 @@
 <script setup>
 import { ref, computed, onMounted, watch } from "vue";
 import { useRouter } from "vue-router";
-import { useAccounts } from "@/composables/useAccounts"; // TODO: раскомментировать когда будет нужно
+import { useI18n } from "vue-i18n";
+import { useAccounts, accountFromOwnerAccessJson } from "@/composables/useAccounts";
 import { mnemonicValidate, encodeAddress } from "@polkadot/util-crypto";
 import { Keyring } from "@polkadot/keyring";
 import config from "@/config/default/config.json";
@@ -178,6 +201,7 @@ import Copy from "@/components/controls/Copy.vue";
 
 const accountStore = useAccounts();
 const router = useRouter();
+const { t } = useI18n();
 
 const passPhrase = ref("");
 const keepSigned = ref(false);
@@ -195,13 +219,39 @@ const sensorsByAddr = ref({});
 const sensorsLoadingByAddr = ref({});
 const avatarsByAddr = ref({});
 
+function accountSensors(acc) {
+  const addr = acc?.address;
+  if (!addr) return [];
+  const loaded = sensorsByAddr.value[addr];
+  if (Array.isArray(loaded) && loaded.length > 0) return loaded;
+  if (Array.isArray(acc?.devices) && acc.devices.length > 0) return acc.devices;
+  return [];
+}
+
 onMounted(() => {
   accountStore.getAccounts();
 });
 
 watch(
-  () => accounts.value.map((a) => a.address).join(","),
+  () =>
+    accounts.value
+      .map((a) => `${a.address}:${(a.devices || []).join(",")}`)
+      .join("|"),
   async () => {
+    const nextSensors = { ...sensorsByAddr.value };
+    for (const acc of accounts.value) {
+      const addr = acc?.address;
+      if (!addr) continue;
+      if (!nextSensors[addr]?.length) {
+        const sensors = await accountStore.getUserSensors(addr);
+        if (sensors.length > 0) nextSensors[addr] = sensors;
+        else if (Array.isArray(acc.devices) && acc.devices.length > 0) {
+          nextSensors[addr] = [...acc.devices];
+        }
+      }
+    }
+    sensorsByAddr.value = nextSensors;
+
     try {
       const entries = await Promise.all(
         accounts.value
@@ -250,6 +300,39 @@ function getRobonomicsAddressByType(phrase, type) {
 function resetStatus() {
   loginStatus.value = "idle";
   error.value = "";
+}
+
+const ownerJsonInput = ref(null);
+
+function pickOwnerJson() {
+  ownerJsonInput.value?.click?.();
+}
+
+async function handleOwnerJsonImport(ev) {
+  error.value = "";
+  loginStatus.value = "idle";
+  const file = ev?.target?.files?.[0];
+  if (!file) return;
+  try {
+    const text = await file.text();
+    const accountData = await accountFromOwnerAccessJson(text);
+    if (keepSigned.value) {
+      await accountStore.addAccount(accountData, { persist: true });
+    } else {
+      await accountStore.removeAccounts(accountData.address);
+      await accountStore.addAccount(accountData, { persist: false });
+    }
+    lastAddress.value = accountData.address;
+    passPhrase.value = "";
+    loginStatus.value = "success";
+    showAddAnother.value = false;
+    await router.push({ name: "main" });
+  } catch (e) {
+    error.value = e?.message ? t(e.message) : t("Cannot import owner access JSON");
+    loginStatus.value = "error";
+  } finally {
+    if (ev?.target) ev.target.value = "";
+  }
 }
 
 async function handleLogin(e) {
@@ -337,8 +420,8 @@ async function onSensorsToggle(acc, event) {
   if (!open) return;
   const addr = acc?.address;
   if (!addr) return;
-  if (sensorsLoadingByAddr.value[addr]) return;
-  if (Array.isArray(sensorsByAddr.value[addr]) && sensorsByAddr.value[addr].length > 0) return;
+  if (acc.sensorsLoading) return;
+  if (accountSensors(acc).length > 0) return;
 
   try {
     sensorsLoadingByAddr.value = { ...sensorsLoadingByAddr.value, [addr]: true };
@@ -597,5 +680,45 @@ select {
   border-radius: 12px;
   background: rgba(220, 70, 70, 0.1);
   color: var(--color-red);
+}
+
+.import-owner {
+  margin: 0.75rem 0 0;
+  padding-top: 0.85rem;
+  border-top: 1px solid var(--surface-border-soft, rgba(0, 0, 0, 0.08));
+  display: grid;
+  gap: 0.55rem;
+  width: 100%;
+}
+
+.import-owner-notice {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.45rem;
+  margin: 0;
+  padding: 0.45rem 0.6rem;
+  border-radius: 8px;
+  border: 1px solid rgba(200, 140, 0, 0.22);
+  border-left: 3px solid rgba(200, 140, 0, 0.72);
+  background: rgba(255, 193, 7, 0.07);
+  font-size: calc(var(--font-size) * 0.8);
+  line-height: 1.35;
+  color: color-mix(in srgb, var(--app-textcolor, #222) 76%, #8a6200);
+}
+
+.import-owner-notice__icon {
+  margin-top: 0.08em;
+  flex: 0 0 auto;
+  font-size: calc(var(--font-size) * 0.95);
+  color: rgba(180, 120, 0, 0.9);
+}
+
+.import-owner .button {
+  width: auto;
+  margin-top: 0.2rem;
+}
+
+.file-input {
+  display: none;
 }
 </style>

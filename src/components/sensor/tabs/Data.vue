@@ -78,7 +78,7 @@
         </div>
       </div>
 
-      <div v-if="chartHasData" class="chart-area">
+      <div v-if="chartHasData" class="chart-area" :class="{ 'chart-area--locked': showEncryptedLoginNotice }">
         <ChartHealthWarning
           :log="log"
           :sensor-id="point?.sensor_id"
@@ -86,11 +86,32 @@
         />
         <Chart
           :log="log"
+          :log-revision="chartLogRevision"
           :geo-addresses="chartGeoAddresses"
           :show-geo-in-tooltip="showChartGeoInTooltip"
           :address-for-timestamp="chartAddressForTimestamp"
           @active-legend-change="chartActiveLegendKey = $event"
         />
+        <div
+          v-if="showEncryptedLoginNotice"
+          class="chart-encrypted-overlay"
+          role="status"
+          aria-live="polite"
+        >
+          <div class="chart-encrypted-overlay__card">
+            <font-awesome-icon
+              icon="fa-solid fa-lock"
+              class="chart-encrypted-overlay__icon"
+              aria-hidden="true"
+            />
+            <p class="chart-encrypted-overlay__text">
+              {{ encryptedNoticeIsLogin ? t("sensorpopup.encrypted_login_notice") : t("sensorpopup.encrypted_decrypt_pending") }}
+            </p>
+            <router-link to="/login/" class="chart-encrypted-overlay__cta">
+              {{ t("Login") }}
+            </router-link>
+          </div>
+        </div>
       </div>
       <div v-else-if="showNoDataMessage" class="no-data-message">
         {{ $t("No data available") }}
@@ -156,7 +177,7 @@
 import { computed, ref, watch, inject } from "vue";
 import { useI18n } from "vue-i18n";
 import { useMap } from "@/composables/useMap";
-import { useSensors, formatSensorIdShort, isPanelSensorPickerReady, isPanelOwnerLoading, resolveSensorType } from "@/composables/useSensors";
+import { useSensors, formatSensorIdShort, isPanelSensorPickerReady, isPanelOwnerLoading, resolveSensorType, isOwnerAccountLoggedIn } from "@/composables/useSensors";
 import { useAccounts } from "@/composables/useAccounts";
 import { getAvatar } from "@/utils/avatarGenerator";
 import {
@@ -165,6 +186,10 @@ import {
   useLogsHealth,
 } from "@/utils/calculations/sensor/logs_health.js";
 import measurements from "../../../measurements";
+import {
+  bagHasEncryptedForLegend,
+  logHasEncryptedForLegend,
+} from "@/utils/sensorValueCrypto";
 
 import AQI from "../widgets/AQI.vue";
 import Chart from "../widgets/Chart.vue";
@@ -199,10 +224,8 @@ const isOwnerLoading = computed(() => isPanelOwnerLoading(props.point));
 const sensorType = computed(() => resolveSensorType(props.point, props.log));
 
 const isOwnerLoggedIn = computed(() => {
-  const owner = ownerKey.value;
-  if (!owner) return false;
   const accounts = Array.isArray(accountStore.accounts?.value) ? accountStore.accounts.value : [];
-  return accounts.some((acc) => String(acc?.address || "").trim() === owner);
+  return isOwnerAccountLoggedIn(accounts, ownerKey.value, props.point?.sensor_id);
 });
 
 watch(
@@ -213,7 +236,35 @@ watch(
   { immediate: true }
 );
 
+const chartLogRevision = computed(
+  () => props.point?._decryptRev ?? props.point?._logsKey ?? ""
+);
+
 const chartActiveLegendKey = ref(null);
+
+const activeChartLegend = computed(
+  () => chartActiveLegendKey.value || mapState.currentUnit.value || null
+);
+
+const activeLegendHasEncryptedValues = computed(() => {
+  const legend = activeChartLegend.value;
+  if (!legend) return false;
+  if (logHasEncryptedForLegend(props.log, legend)) return true;
+  return (
+    bagHasEncryptedForLegend(props.point?.data, legend) ||
+    bagHasEncryptedForLegend(props.point?.maxdata, legend)
+  );
+});
+
+const showEncryptedLoginNotice = computed(() => {
+  if (!Boolean(ownerKey.value) || !activeLegendHasEncryptedValues.value) return false;
+  return true;
+});
+
+const encryptedNoticeIsLogin = computed(
+  () => showEncryptedLoginNotice.value && !isOwnerLoggedIn.value
+);
+
 
 const logsHealthSensorUserHide = computed(() =>
   Boolean(
@@ -479,6 +530,64 @@ watch(
 .chart-area {
   position: relative;
 }
+
+.chart-area--locked :deep(.chart-section-chart),
+.chart-area--locked :deep(.custom-legend) {
+  filter: blur(2px);
+  pointer-events: none;
+  user-select: none;
+}
+
+.chart-encrypted-overlay {
+  position: absolute;
+  inset: 0;
+  z-index: 5;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: var(--gap);
+  background: color-mix(in srgb, var(--color-light, #fff) 35%, transparent);
+  backdrop-filter: blur(1px);
+}
+
+.chart-encrypted-overlay__card {
+  max-width: 22rem;
+  padding: calc(var(--gap) * 1.5);
+  border-radius: var(--radius-sm);
+  background: color-mix(in srgb, var(--color-light, #fff) 92%, transparent);
+  border: 1px solid color-mix(in srgb, var(--color-dark, #222) 12%, transparent);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.08);
+  text-align: center;
+}
+
+.chart-encrypted-overlay__icon {
+  font-size: 1.4rem;
+  color: var(--color-dark);
+  margin-bottom: calc(var(--gap) * 0.75);
+}
+
+.chart-encrypted-overlay__text {
+  margin: 0 0 var(--gap);
+  font-size: 0.95em;
+  line-height: 1.45;
+  color: var(--color-dark);
+}
+
+.chart-encrypted-overlay__cta {
+  display: inline-block;
+  padding: 0.45rem 0.9rem;
+  border-radius: 999px;
+  background: var(--color-blue);
+  color: #fff;
+  text-decoration: none;
+  font-weight: 600;
+  font-size: 0.9em;
+}
+
+.chart-encrypted-overlay__cta:hover {
+  filter: brightness(0.95);
+}
+
 
 .logs-health-warning-banner {
   padding: var(--gap);

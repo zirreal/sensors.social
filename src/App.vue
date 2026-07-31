@@ -19,7 +19,7 @@ import { RouterView } from "vue-router";
 import { onMounted, watch } from "vue";
 import { useRoute, useRouter } from "vue-router";
 
-import { useAccounts } from "@/composables/useAccounts"; // TODO: раскомментировать когда будет нужно
+import { useAccounts } from "@/composables/useAccounts";
 
 import config from "@/config/default/config.json";
 // import { getSensorsMapList } from "./utils/map/markers/requests"; // Убран - теперь используется только в Main.vue
@@ -96,7 +96,6 @@ onMounted(async () => {
   затем для каждого обновляем devices из сети (getUserSensors) и
   сохраняем обратно через addAccount.
 */
-  // TODO: раскомментировать когда будет нужно
   if (config.SERVICES.accounts) {
     const accountStore = useAccounts();
     const accounts = await accountStore.getAccounts();
@@ -107,6 +106,7 @@ onMounted(async () => {
         await accountStore.addAccount(
           {
             phrase: acc.phrase || "",
+            seedHex: acc.seedHex || "",
             address: acc.address,
             type: acc.type,
             devices: sensors,

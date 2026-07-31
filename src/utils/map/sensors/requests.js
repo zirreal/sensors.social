@@ -5,6 +5,7 @@ import { hasValidCoordinates, fetchJson } from "../../utils";
 import { dayISO, dayBoundsUnix, timelineFetchBounds } from "../../date";
 import { mapLayerUnitIds, sortMapLayerUnits } from "../../../measurements/tools";
 import { settings, excluded_sensors } from "@config";
+import { decryptMeasurementBag } from "@/utils/sensorValueCrypto";
 
 // Глобальные константы провайдеров
 const REMOTE_PROVIDER = new Provider(settings.REMOTE_PROVIDER);
@@ -17,6 +18,53 @@ let providerObj = null;
 const sensorV2Inflight = new Map();
 const sensorV2Recent = new Map();
 const SENSOR_V2_RECENT_MS = 60_000;
+
+async function decryptSensorHistoryEntries(sensorId, entries, ownerAddress) {
+  const owner = normalizeOwnerKey({ owner: ownerAddress });
+  if (!owner || !Array.isArray(entries) || entries.length === 0) return entries;
+
+  let ownerAccount = { address: owner };
+  try {
+    const { useAccounts } = await import("@/composables/useAccounts");
+    const list = useAccounts().accounts.value;
+    const hasSecret = (a) =>
+      String(a?.phrase || "").trim() ||
+      String(a?.seedHex || "").trim() ||
+      (a?.seed instanceof Uint8Array && a.seed.length >= 32);
+    const byOwner = list.find(
+      (a) => String(a?.address || "").trim() === owner && hasSecret(a)
+    );
+    if (byOwner) ownerAccount = byOwner;
+    else {
+      const sid = String(sensorId || "").trim();
+      const bySensor = list.find(
+        (a) => String(a?.address || "").trim() === sid && hasSecret(a)
+      );
+      if (bySensor) ownerAccount = bySensor;
+      else {
+        const byDevice = list.find(
+          (a) =>
+            hasSecret(a) &&
+            Array.isArray(a.devices) &&
+            a.devices.some((deviceId) => String(deviceId).trim() === sid)
+        );
+        if (byDevice) ownerAccount = byDevice;
+      }
+    }
+  } catch {
+    // Fall back to address-only lookup inside decryptMeasurementBag.
+  }
+
+  return Promise.all(
+    entries.map(async (entry) => {
+      if (!entry?.data || typeof entry.data !== "object") return entry;
+      const data = await decryptMeasurementBag(sensorId, entry.data, ownerAccount);
+      return data === entry.data ? entry : { ...entry, data };
+    })
+  );
+}
+
+
 
 /**
  * Day fetch bounds aligned with getSensorDataWithCache: for today end = now, not end-of-day.
@@ -1179,7 +1227,11 @@ export async function getSensorData(
         // v2 responded without owner meta — avoid duplicate owner workaround fetch this session.
         rosemanOwnerWorkaroundCache.set(String(sensorId), { owner: null, ts: Date.now() });
       }
-      const historyData = payload?.result;
+      let historyData = payload?.result;
+      const owner = normalizeOwnerKey(payload?.sensor);
+      if (Array.isArray(historyData) && owner) {
+        historyData = await decryptSensorHistoryEntries(sensorId, historyData, owner);
+      }
       // Если данных нет, возвращаем [] (загружено, но пусто), если null/undefined - null (не загружено)
       return Array.isArray(historyData) ? historyData : null;
     }
@@ -1761,6 +1813,15 @@ export async function getSensorDataWithCache(
     // Добавляем метаданные из кэша для использования в компонентах
     result._cachedOwner = cachedResult.owner ?? null;
     result._cachedType = cachedResult.type ?? null;
+
+    const ownerForDecrypt =
+      cacheMeta?.owner ?? cachedResult.owner ?? normalizeOwnerKey(getCachedSensorMeta(sensorId));
+    if (ownerForDecrypt) {
+      const decrypted = await decryptSensorHistoryEntries(sensorId, result, ownerForDecrypt);
+      result.length = 0;
+      result.push(...decrypted);
+    }
+
     emitProgress({ status: "done", loadedDays: totalDays, missingDays: 0, totalDays, cachedDays });
 
     return result.sort((a, b) => a.timestamp - b.timestamp);

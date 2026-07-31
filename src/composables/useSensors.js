@@ -8,7 +8,7 @@ import { ref, computed, watch, nextTick } from "vue";
 import { useRouter, useRoute } from "vue-router";
 
 import { useMap } from "@/composables/useMap";
-import { peekUserSensorsCache } from "@/composables/useAccounts";
+import { peekUserSensorsCache, useAccounts, accountHasOwnerSecret } from "@/composables/useAccounts";
 import { isPointBookmarked, refreshAllMarkerBookmarkHighlights } from "@/composables/useBookmarks";
 
 import { excluded_sensors, settings } from "@config";
@@ -38,6 +38,12 @@ import { hasValidCoordinates } from "../utils/utils";
 import { dayISO, timelineFetchBounds } from "@/utils/date";
 import { getMapAddressZoom } from "@/utils/map/defaultView";
 import { loadLogsHealth } from "../utils/calculations/sensor/logs_health.js";
+import converter from "../measurements";
+import {
+  decryptMeasurementBag,
+  measurementBagHasEncryptedValues,
+} from "../utils/sensorValueCrypto";
+import { getProvider } from "../utils/map/sensors/requests";
 
 import {
   resolveSensorType,
@@ -95,6 +101,9 @@ let currentLogsKey = null;
 let logsRequestInFlight = false;
 let popupSessionId = 0;
 let realtimeHydrationWatchersRegistered = false;
+let ownerDecryptWatchersRegistered = false;
+let setSensorDataHandler = null;
+let updateSensorLogsHandler = null;
 
 const ownerPromises = new Map();
 
@@ -118,6 +127,239 @@ const isSensor = computed(() => {
 });
 
 // --- Methods (module-private) ---
+
+
+
+function logHasEncryptedValues(logs) {
+  if (!Array.isArray(logs)) return false;
+  return logs.some((item) => measurementBagHasEncryptedValues(item?.data));
+}
+
+async function redecryptDataBag(sensorId, bag, ownerAccount) {
+  if (!bag || typeof bag !== "object") return bag;
+  const decrypted = await decryptMeasurementBag(sensorId, bag, ownerAccount);
+  const out = {};
+  for (const [key, raw] of Object.entries(decrypted)) {
+    const name = String(key).toLowerCase();
+    if (typeof raw === "string" && raw.startsWith("e.")) {
+      out[name] = raw;
+      continue;
+    }
+    out[name] = converter[name]?.calculate ? converter[name].calculate(raw) : raw;
+  }
+  return out;
+}
+
+async function redecryptLogEntries(sensorId, logs, ownerAccount) {
+  if (!Array.isArray(logs) || logs.length === 0) return { logs, changed: false };
+  let changed = false;
+  const next = await Promise.all(
+    logs.map(async (item) => {
+      if (!item?.data || !measurementBagHasEncryptedValues(item.data)) return item;
+      const data = await redecryptDataBag(sensorId, item.data, ownerAccount);
+      if (JSON.stringify(data) === JSON.stringify(item.data)) return item;
+      changed = true;
+      return { ...item, data };
+    })
+  );
+  return { logs: next, changed };
+}
+
+/** Merge popup/stream logs with libp2p history; decrypt when owner seed is available. */
+async function hydrateRealtimeLogsForSensor(sensorId, existingLogs, ownerAccount) {
+  const provider = getProvider();
+  if (provider?.redecryptHistoryForSensor && ownerAccount) {
+    await provider.redecryptHistoryForSensor(sensorId, ownerAccount);
+  }
+
+  let logs = normalizeSensorLogs(existingLogs);
+  if (provider?.getHistoryBySensor) {
+    const history = historyPointsToLogs(await provider.getHistoryBySensor(sensorId));
+    logs = mergeSensorLogsByTimestamp(logs, history);
+  }
+
+  if (logs.length > 0 && ownerAccount) {
+    ({ logs } = await redecryptLogEntries(sensorId, logs, ownerAccount));
+  }
+  return logs;
+}
+
+function isSensorOpenFor(sensorId) {
+  return sensorPoint.value && String(sensorPoint.value.sensor_id) === String(sensorId);
+}
+
+
+function historyPointsToLogs(history) {
+  if (!Array.isArray(history)) return [];
+  return history
+    .map((p) => {
+      const ts = Number(p?.timestamp);
+      if (!Number.isFinite(ts) || !p?.data) return null;
+      const entry = { timestamp: ts, data: p.data };
+      if (p.geo && Number.isFinite(Number(p.geo.lat)) && Number.isFinite(Number(p.geo.lng))) {
+        entry.geo = p.geo;
+      }
+      return entry;
+    })
+    .filter(Boolean)
+    .sort((a, b) => a.timestamp - b.timestamp);
+}
+
+function resolveOwnerAccount(accountsList, ownerAddress, sensorId) {
+  const list = Array.isArray(accountsList) ? accountsList : [];
+  const owner = String(ownerAddress || "").trim();
+  const sid = String(sensorId || "").trim();
+
+  if (owner) {
+    const byOwner = list.find(
+      (a) => String(a?.address || "").trim() === owner && accountHasOwnerSecret(a)
+    );
+    if (byOwner) return byOwner;
+  }
+
+  if (sid) {
+    const bySensorAsAccount = list.find(
+      (a) => String(a?.address || "").trim() === sid && accountHasOwnerSecret(a)
+    );
+    if (bySensorAsAccount) return bySensorAsAccount;
+
+    const byDevice = list.find(
+      (a) =>
+        accountHasOwnerSecret(a) &&
+        Array.isArray(a.devices) &&
+        a.devices.some((deviceId) => String(deviceId).trim() === sid)
+    );
+    if (byDevice) return byDevice;
+  }
+
+  return null;
+}
+
+function isOwnerAccountLoggedIn(accountsList, ownerAddress, sensorId) {
+  return !!resolveOwnerAccount(accountsList, ownerAddress, sensorId);
+}
+
+async function redecryptAllRealtimeHistory(accountsList) {
+  const mapState = useMap();
+  if (mapState.currentProvider.value !== "realtime") return;
+
+  const provider = getProvider();
+  if (!provider?.redecryptHistoryForSensor || !provider?.history) return;
+
+  const list = Array.isArray(accountsList) ? accountsList : [];
+  if (list.length === 0) return;
+
+  await Promise.all(
+    Object.keys(provider.history).map(async (sensorId) => {
+      const sid = String(sensorId);
+      const items = provider.history[sensorId];
+      const pointOwner = items?.find((item) => item?.owner)?.owner;
+      const account = resolveOwnerAccount(list, pointOwner, sid);
+      if (!account) return;
+
+      const changed = await provider.redecryptHistoryForSensor(sid, account);
+      if (!changed) return;
+
+      const history = provider.history[sid];
+      const latest = Array.isArray(history) ? history[history.length - 1] : null;
+      if (!latest?.data || measurementBagHasEncryptedValues(latest.data)) return;
+
+      if (setSensorDataHandler) {
+        setSensorDataHandler(sid, {
+          data: latest.data,
+          owner: latest.owner || null,
+          geo: latest.geo,
+          model: latest.model,
+          device_model: latest.device_model,
+          timestamp: latest.timestamp,
+        });
+      }
+    })
+  );
+}
+
+/** Decrypt open popup (+ realtime history) when a logged-in owner seed is available. */
+async function runOwnerDecrypt() {
+  const mapState = useMap();
+  const popup = sensorPoint.value;
+  if (!popup?.sensor_id) return;
+
+  const owner = normalizeOwnerKey(popup);
+  const sensorId = String(popup.sensor_id);
+  const accountsList = useAccounts().accounts.value;
+  const ownerAccount = resolveOwnerAccount(accountsList, owner, sensorId);
+  if (!ownerAccount) return;
+
+  const needsDataDecrypt = measurementBagHasEncryptedValues(popup.data);
+  const needsLogsDecrypt = logHasEncryptedValues(popup.logs);
+  if (!needsDataDecrypt && !needsLogsDecrypt && mapState.currentProvider.value !== "realtime") {
+    return;
+  }
+
+  let nextData = popup.data;
+  if (needsDataDecrypt) {
+    nextData = await redecryptDataBag(sensorId, popup.data, ownerAccount);
+  }
+
+  let logsOut = normalizeSensorLogs(popup.logs);
+  if (mapState.currentProvider.value === "realtime") {
+    const provider = getProvider();
+    if (provider?.redecryptHistoryForSensor) {
+      await provider.redecryptHistoryForSensor(sensorId, ownerAccount);
+    }
+    const history = historyPointsToLogs(await provider?.getHistoryBySensor?.(sensorId));
+    if (history.length > 0) {
+      const latestHistory = history[history.length - 1];
+      if (
+        latestHistory?.data &&
+        !measurementBagHasEncryptedValues(latestHistory.data)
+      ) {
+        nextData = latestHistory.data;
+      }
+    }
+    const nextLogs = await hydrateRealtimeLogsForSensor(sensorId, logsOut, ownerAccount);
+    logsOut = nextLogs.length > 0 ? [...nextLogs] : [...logsOut];
+  } else if (needsLogsDecrypt) {
+    ({ logs: logsOut } = await redecryptLogEntries(sensorId, logsOut, ownerAccount));
+  }
+
+  const stillEncrypted =
+    measurementBagHasEncryptedValues(nextData) || logHasEncryptedValues(logsOut);
+  if (
+    stillEncrypted &&
+    !needsDataDecrypt &&
+    !needsLogsDecrypt &&
+    mapState.currentProvider.value !== "realtime"
+  ) {
+    return;
+  }
+
+  const decryptRev = (popup._decryptRev || 0) + 1;
+  sensorPoint.value = {
+    ...popup,
+    data: nextData,
+    logs: logsOut,
+    owner: owner || popup.owner || ownerAccount.address || popup.owner,
+    _decryptRev: decryptRev,
+    _logsKey: popup._logsKey || `owner-decrypt:${sensorId}:${decryptRev}`,
+  };
+
+  if (setSensorDataHandler) {
+    setSensorDataHandler(sensorId, {
+      data: nextData,
+      ...(logsOut.length > 0 ? { logs: logsOut } : null),
+    });
+  }
+
+  if (
+    updateSensorLogsHandler &&
+    isSensorOpenFor(sensorId) &&
+    mapState.currentProvider.value === "realtime" &&
+    stillEncrypted
+  ) {
+    await updateSensorLogsHandler(sensorId);
+  }
+}
 
 function pmValueMeansMissing(value) {
   const n = Number(value);
@@ -167,6 +409,19 @@ function normalizeSensorLogs(logs) {
   return logs.map(normalizeSensorLogEntry).filter(Boolean);
 }
 
+function logEntryHasEncryptedData(entry) {
+  return measurementBagHasEncryptedValues(entry?.data);
+}
+
+/** When timestamps collide, keep decrypted readings over still-encrypted ones. */
+function preferMergedLogEntry(incumbent, candidate) {
+  const incEnc = logEntryHasEncryptedData(incumbent);
+  const candEnc = logEntryHasEncryptedData(candidate);
+  if (incEnc && !candEnc) return candidate;
+  if (!incEnc && candEnc) return incumbent;
+  return candidate;
+}
+
 function mergeSensorLogsByTimestamp(streaming, api) {
   const stream = normalizeSensorLogs(streaming);
   const remote = normalizeSensorLogs(api);
@@ -174,7 +429,10 @@ function mergeSensorLogsByTimestamp(streaming, api) {
   if (stream.length === 0) return remote;
   const byTs = new Map();
   for (const item of remote) byTs.set(item.timestamp, item);
-  for (const item of stream) byTs.set(item.timestamp, item);
+  for (const item of stream) {
+    const prev = byTs.get(item.timestamp);
+    byTs.set(item.timestamp, prev ? preferMergedLogEntry(prev, item) : item);
+  }
   return Array.from(byTs.values()).sort((a, b) => a.timestamp - b.timestamp);
 }
 
@@ -483,10 +741,47 @@ export function useSensors() {
       return logRequestResult({ superseded: true });
     }
 
-    // Realtime chart: pubsub appends logs.
+    // Realtime chart: hydrate libp2p history and decrypt when owner/device backup is loaded.
     if (isRealtimeMode && mapState.timelineMode.value === "realtime") {
+      const owner = normalizeOwnerKey(sensorPoint.value);
+      const accountStore = useAccounts();
+      const ownerAccount = resolveOwnerAccount(
+        accountStore.accounts.value,
+        owner,
+        sensorId
+      );
+
+      if (ownerAccount) {
+        let nextData = sensorPoint.value?.data;
+        if (measurementBagHasEncryptedValues(nextData)) {
+          nextData = await redecryptDataBag(sensorId, nextData, ownerAccount);
+        }
+        const nextLogs = await hydrateRealtimeLogsForSensor(
+          sensorId,
+          sensorPoint.value?.logs,
+          ownerAccount
+        );
+        const decryptRev = (sensorPoint.value?._decryptRev || 0) + 1;
+        sensorPoint.value = {
+          ...sensorPoint.value,
+          data: nextData,
+          logs: nextLogs.length > 0 ? [...nextLogs] : [...(sensorPoint.value?.logs ?? [])],
+          _decryptRev: decryptRev,
+          _logsKey: sensorPoint.value?._logsKey || `${requestedKey}:live`,
+        };
+        if (nextLogs.length > 0) {
+          setSensorData(sensorId, { data: nextData, logs: nextLogs });
+        }
+        resetLogsProgress();
+        return logRequestResult({
+          ok: true,
+          deduped: true,
+          timelineMode: mapState.timelineMode.value,
+        });
+      }
+
       const live = normalizeSensorLogs(sensorPoint.value?.logs);
-      if (live.length > 0) {
+      if (live.length > 0 && !logHasEncryptedValues(live)) {
         resetLogsProgress();
         return logRequestResult({
           ok: true,
@@ -503,6 +798,46 @@ export function useSensors() {
       const currentLogs = sensorPoint.value?.logs;
       const loadedKey = sensorPoint.value?._logsKey || null;
       if (loadedKey && loadedKey === requestedKey && Array.isArray(currentLogs)) {
+        const accountStore = useAccounts();
+        const ownerAccount = resolveOwnerAccount(
+          accountStore.accounts.value,
+          normalizeOwnerKey(sensorPoint.value),
+          sensorId
+        );
+        if (ownerAccount && logHasEncryptedValues(currentLogs)) {
+          const { logs: decryptedLogs } = await redecryptLogEntries(
+            sensorId,
+            currentLogs,
+            ownerAccount
+          );
+          const cleanLogs = sanitizeSensorLogsPmSentinels(decryptedLogs);
+          const ownerSensorsWithData = applyFilteredOwnerBundleOptions(
+            sensorPoint.value,
+            sensorPoint.value?.ownerSensorsWithData,
+            sensors.value
+          );
+          const decryptRev = (sensorPoint.value?._decryptRev || 0) + 1;
+          sensorPoint.value = {
+            ...sensorPoint.value,
+            logs: cleanLogs,
+            _decryptRev: decryptRev,
+            ...(ownerSensorsWithData?.length ? { ownerSensorsWithData } : null),
+          };
+          const existsOnMap = sensors.value?.some((s) => s?.sensor_id === sensorId);
+          if (existsOnMap) setSensorData(sensorId, { logs: cleanLogs });
+          if (runLogsHealth.value) {
+            void loadLogsHealth(sensorId, cleanLogs, {
+              currentDate: mapState.currentDate.value,
+              timelineMode: mapState.timelineMode.value,
+            });
+          }
+          return logRequestResult({
+            ok: true,
+            deduped: true,
+            timelineMode: mapState.timelineMode.value,
+          });
+        }
+
         resetLogsProgress();
         const cleanLogs = sanitizeSensorLogsPmSentinels(currentLogs);
         const ownerSensorsWithData = applyFilteredOwnerBundleOptions(
@@ -670,6 +1005,18 @@ export function useSensors() {
         let logs = isRealtimeMode
           ? mergeSensorLogsByTimestamp(sensorPoint.value?.logs, cleanLogs)
           : cleanLogs;
+
+        if (!isRealtimeMode) {
+          const accountStore = useAccounts();
+          const ownerAccount = resolveOwnerAccount(
+            accountStore.accounts.value,
+            normalizeOwnerKey(sensorPoint.value),
+            sensorId
+          );
+          if (ownerAccount && logHasEncryptedValues(logs)) {
+            ({ logs } = await redecryptLogEntries(sensorId, logs, ownerAccount));
+          }
+        }
 
         // Realtime chart: empty API before pubsub → keep null (skeleton), not "no data".
         if (
@@ -2106,6 +2453,41 @@ export function useSensors() {
    * Realtime hydration: patch popup geo from pubsub and refresh owner bundle when
    * sibling devices appear in the same 3 km cluster.
    */
+
+  if (!ownerDecryptWatchersRegistered) {
+    ownerDecryptWatchersRegistered = true;
+    const accountStore = useAccounts();
+
+    setSensorDataHandler = setSensorData;
+    updateSensorLogsHandler = updateSensorLogs;
+    void runOwnerDecrypt();
+
+    watch(
+      () => {
+        const popup = sensorPoint.value;
+        const owner = normalizeOwnerKey(popup);
+        const sid = popup?.sensor_id ? String(popup.sensor_id) : "";
+        const accountsList = accountStore.accounts.value;
+        const accountsUnlockKey = accountsList
+          .map((a) => {
+            const addr = String(a?.address || "").trim();
+            const secret = accountHasOwnerSecret(a) ? "1" : "0";
+            const devices = Array.isArray(a.devices) ? a.devices.length : 0;
+            return `${addr}:${secret}:${devices}`;
+          })
+          .sort()
+          .join("|");
+        const needsDecrypt =
+          measurementBagHasEncryptedValues(popup?.data) || logHasEncryptedValues(popup?.logs);
+        return `${mapState.currentProvider.value}|${sid}|${owner}|${popup?._ownerResolved ? "1" : "0"}|${accountsUnlockKey}|${needsDecrypt}|${popup?.logs?.length || 0}`;
+      },
+      () => {
+        void runOwnerDecrypt();
+      },
+      { immediate: true, flush: "post" }
+    );
+  }
+
   if (!realtimeHydrationWatchersRegistered) {
     realtimeHydrationWatchersRegistered = true;
     watch(
@@ -2248,3 +2630,9 @@ export {
   pickSensorIdForMapUnit,
 } from "./sensorOwnerBundle";
 export { ownerBundleHasDualDevices, mapMarkerIcon, refreshMarkerIconsForSensors } from "./sensorMarkerIcons";
+
+export { redecryptDataBag, resolveOwnerAccount, historyPointsToLogs, isOwnerAccountLoggedIn, hydrateRealtimeLogsForSensor };
+export async function refreshRealtimeOwnerDecrypt() {
+  await redecryptAllRealtimeHistory(useAccounts().accounts.value);
+  return runOwnerDecrypt();
+}

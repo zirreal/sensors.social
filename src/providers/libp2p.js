@@ -1,6 +1,8 @@
 import { agents } from "@config";
 import converter from "../measurements";
 import { createNode } from "../utils/libp2p";
+import { decryptMeasurementBag, isEncryptedSensorValue } from "../utils/sensorValueCrypto";
+import { useAccounts } from "@/composables/useAccounts";
 
 const topic = "airalab.lighthouse.5.robonomics.eth";
 
@@ -64,9 +66,49 @@ class Provider {
     return Promise.resolve(result);
   }
 
+  async redecryptHistoryForSensor(sensorId, ownerAccount) {
+    const sid = String(sensorId || "");
+    if (!sid || !Array.isArray(this.history[sid]) || !ownerAccount) return false;
+
+    let changed = false;
+    const next = [];
+    for (const item of this.history[sid]) {
+      if (!item?.data || typeof item.data !== "object") {
+        next.push(item);
+        continue;
+      }
+      let decryptedMeasurement = item.data;
+      try {
+        decryptedMeasurement = await decryptMeasurementBag(sid, item.data, ownerAccount);
+      } catch (error) {
+        console.warn("Failed to decrypt history measurement:", sid, error);
+      }
+      const measurementLowerCase = {};
+      for (const key in decryptedMeasurement) {
+        const name = key.toLowerCase();
+        const raw = decryptedMeasurement[key];
+        if (isEncryptedSensorValue(raw)) {
+          measurementLowerCase[name] = raw;
+          continue;
+        }
+        measurementLowerCase[name] = converter[name]?.calculate
+          ? converter[name].calculate(raw)
+          : raw;
+      }
+      if (JSON.stringify(measurementLowerCase) !== JSON.stringify(item.data)) {
+        changed = true;
+        next.push({ ...item, data: measurementLowerCase });
+      } else {
+        next.push(item);
+      }
+    }
+    if (changed) this.history[sid] = next;
+    return changed;
+  }
+
   watch(cb) {
     this.node.services.pubsub.subscribe(topic);
-    this.node.services.pubsub.addEventListener("message", (evt) => {
+    this.node.services.pubsub.addEventListener("message", async (evt) => {
       const sender = evt.detail.from.toString();
       if (!this.whiteListAccounts.includes(sender)) {
         // console.log(`skip from ${sender}`);
@@ -92,15 +134,54 @@ class Provider {
             }) === undefined)
         ) {
           const { timestamp, ...measurement } = data.measurement;
+          const owner = data.owner || undefined;
+          let decryptedMeasurement = measurement;
+          const { accounts } = useAccounts();
+          const sid = String(sensor_id).trim();
+          const ownerAddr = owner ? String(owner).trim() : "";
+          const hasSecret = (a) =>
+            String(a?.phrase || "").trim() ||
+            String(a?.seedHex || "").trim() ||
+            (a?.seed instanceof Uint8Array && a.seed.length >= 32);
+          const acc = accounts.value.find((a) => {
+            if (!hasSecret(a)) return false;
+            const addr = String(a?.address || "").trim();
+            if (sid && addr === sid) return true;
+            if (ownerAddr && addr === ownerAddr) return true;
+            if (
+              sid &&
+              Array.isArray(a.devices) &&
+              a.devices.some((deviceId) => String(deviceId).trim() === sid)
+            ) {
+              return true;
+            }
+            return false;
+          });
+          const ownerAccount = acc || (owner ? { address: owner } : null);
+          if (ownerAccount) {
+            try {
+              decryptedMeasurement = await decryptMeasurementBag(
+                sensor_id,
+                measurement,
+                ownerAccount
+              );
+            } catch (error) {
+              console.warn("Failed to decrypt pubsub measurement:", sensor_id, error);
+            }
+          }
           const measurementLowerCase = {};
-          for (var key in measurement) {
+          for (var key in decryptedMeasurement) {
             const name = key.toLowerCase();
+            const raw = decryptedMeasurement[key];
+            if (isEncryptedSensorValue(raw)) {
+              measurementLowerCase[name] = raw;
+              continue;
+            }
             measurementLowerCase[name] = converter[name]?.calculate
-              ? converter[name].calculate(measurement[key])
-              : measurement[key];
+              ? converter[name].calculate(raw)
+              : raw;
           }
           const [lat, lng] = data.geo.split(",");
-          const owner = data.owner || undefined;
           const donated_by = data.donated_by || undefined;
           const device_model = data.device_model || undefined;
           const point = {

@@ -169,7 +169,7 @@ watch(
 <style>
 /* Keep very tall infographic-like images on screen without scrolling */
 .blog-post__content img[src$="waterfall-party.webp"],
-.blog-post__content img[src$="what-are-we-really-breathing/images/2.webp"] {
+.blog-post__content img[src$="vertical.webp"] {
   width: 100%;
   max-height: 80vh;
   object-fit: contain;
