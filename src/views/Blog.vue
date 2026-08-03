@@ -222,7 +222,7 @@ console.log();
 
 .blog-list__meta-row {
   display: flex;
-  align-items: baseline;
+  align-items: end;
   justify-content: space-between;
   gap: calc(var(--gap) * 0.5);
 }
