@@ -178,14 +178,6 @@ watch(
   border: none;
 }
 
-/* .blog-post__content img[src$="what-are-we-really-breathing/images/2.webp"] {
-    width: 100%;
-    max-height: 80vh;
-    object-fit: contain;
-    display: block;
-    margin-inline: auto;
-} */
-
 .blog-post__content a > img {
   cursor: pointer;
 }
@@ -193,6 +185,47 @@ watch(
 .blog-post .grid > p {
   display: grid;
   grid-template-columns: 1fr 1fr;
+  gap: var(--gap);
+}
+
+.blog-post .grid.grid-3 > p {
+  grid-template-columns: 1fr 1fr;
+  justify-items: center;
+  align-items: start;
+}
+
+/* Phone screenshots: keep portrait shots readable but not huge on desktop */
+.blog-post .grid.grid-3 > p > img:nth-of-type(-n + 2) {
+  width: auto;
+  max-width: min(100%, 380px);
+  max-height: min(680px, 75vh);
+  height: auto;
+  object-fit: contain;
+  margin-inline: auto;
+}
+
+/* Third screenshot: full-width row under the two mobile shots */
+.blog-post .grid.grid-3 > p > img:nth-of-type(3) {
+  grid-column: 1 / -1;
+  width: 100%;
+  max-width: 100%;
+  max-height: none;
+}
+
+@media (max-width: 630px) {
+  .blog-post .grid > p,
+  .blog-post .grid.grid-3 > p {
+    grid-template-columns: 1fr;
+  }
+
+  .blog-post .grid.grid-3 > p > img:nth-of-type(-n + 2) {
+    max-width: min(100%, 360px);
+    max-height: min(640px, 75vh);
+  }
+
+  .blog-post .grid.grid-3 > p > img:nth-of-type(3) {
+    grid-column: auto;
+  }
 }
 </style>
 
