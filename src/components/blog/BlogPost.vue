@@ -178,6 +178,16 @@ watch(
   border: none;
 }
 
+/* A QR code is read by a phone camera, not by eye, so it gains nothing from
+   being full width — it just fills the whole viewport and pushes the text
+   explaining it off the screen */
+.blog-post__content img[src$="qr.png"] {
+  width: 100%;
+  max-width: 320px;
+  display: block;
+  margin-inline: auto;
+}
+
 .blog-post__content a > img {
   cursor: pointer;
 }
