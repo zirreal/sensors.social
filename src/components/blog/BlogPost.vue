@@ -180,10 +180,13 @@ watch(
 
 /* A QR code is read by a phone camera, not by eye, so it gains nothing from
    being full width — it just fills the whole viewport and pushes the text
-   explaining it off the screen */
-.blog-post__content img[src$="qr.png"] {
-  width: 100%;
-  max-width: 320px;
+   explaining it off the screen. Selected by wrapper class rather than by file
+   name, because the build hashes image file names (images/qr.png is served as
+   /assets/qr-f821f375.png). */
+.blog-post .qr > p > img {
+  width: auto;
+  max-width: min(100%, 320px);
+  height: auto;
   display: block;
   margin-inline: auto;
 }

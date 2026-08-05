@@ -47,7 +47,11 @@ up.
 
 ## The QR code
 
+<div class="qr">
+
 ![QR code that turns an AI assistant into an Altruist setup guide](./images/qr.png)
+
+</div>
 
 Photograph this straight into a chat with your assistant, or scan it and paste
 the decoded text. Then just say what you need — or say nothing at all, and it
