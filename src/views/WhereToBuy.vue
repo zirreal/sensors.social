@@ -92,18 +92,7 @@ const shops = computed(() => [
     logoAlt: "Pinout",
     title: "Pinout",
     description: t("Altruist air quality sensors with installation and setup in Cyprus"),
-  },
-  {
-    id: "ru_cis",
-    regionLabel: t("CIS"),
-    comingSoon: false,
-    tone: "primary",
-    href: "https://market.yandex.ru/search?generalContext=t%3Dmerchant%3Bi%3D1%3Bmrch%3D216593109%3B&rs=eJwzEvjEyMvBKLDwEKsEg0bTnOfsACoUBRA%2C&merchant-filter=216593109",
-    logo: yandexLogo,
-    logoAlt: t("Yandex Market"),
-    title: t("Yandex Market"),
-    description: t("Various Altruist options in CIS countries from a local supplier"),
-  },
+  }
 ]);
 </script>
 
