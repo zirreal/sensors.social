@@ -18,11 +18,23 @@ The system evaluates:
 * Temperature
 * Humidity
 * PM2.5 (when available)
-* Noise level (when available)
+* Noise peaks (when available)
 
 It then produces a **Night Report** and a **Comfort Score** that reflects overall environmental conditions during sleep.
 
 > The Sleep Score reflects environmental comfort, not sleep stages or medical sleep quality.
+
+---
+
+## Target Ranges at a Glance
+
+| Metric      | General                     | Biohacking                 |
+| ----------- | --------------------------- | -------------------------- |
+| CO₂         | ≤ 750 ppm                   | ≤ 600 ppm                  |
+| Temperature | 19–22°C                     | 17–20°C                    |
+| Humidity    | 40–60%                      | 40–50%                     |
+| PM2.5       | ≤ 5 µg/m³                   | ≤ 3 µg/m³                  |
+| Noise       | ≤ 5 hours with peak > 45 dB | ≤ 1 hour with peak > 45 dB |
 
 ---
 
@@ -37,11 +49,11 @@ It then produces a **Night Report** and a **Comfort Score** that reflects overal
 
 The Sleep Analytics screen includes:
 
-| Element          | Meaning                                        |
-| ---------------- | ---------------------------------------------- |
-| Large ring score | Overall comfort score (general model)          |
-| Biohacking score | Stricter comfort model with tighter thresholds |
-| Metric cards     | Night averages for each sensor                 |
+| Element          | Meaning                                                 |
+| ---------------- | ------------------------------------------------------- |
+| Large ring score | Overall comfort score (general model)                   |
+| Biohacking score | Stricter comfort model with tighter thresholds          |
+| Metric cards     | Night summary per sensor (averages; noise = peak hours) |
 
 ---
 
@@ -56,13 +68,13 @@ Insight continuously reads environmental sensors:
 If Urban is enabled:
 
 - PM2.5 particles
-- Noise level
+- Noise (`noiseAvg` / `noiseMax`)
 
-Instead of storing raw high-frequency data, Insight computes **hourly averages**, which are stored locally in device memory.
+Instead of storing raw high-frequency data, Insight computes **hourly averages** (and for noise, the **hourly maximum** of `noiseMax`), which are stored locally in device memory.
 
 ```mermaid id="flow1"
 flowchart LR
-    Sensors[Sensors] --> Hourly[Hourly averages]
+    Sensors[Sensors] --> Hourly[Hourly averages / max]
     Hourly --> Storage[Local storage (~48h)]
     Storage --> Night[Night window]
     Night --> Score[Comfort Score]
@@ -108,15 +120,15 @@ along with the available / expected hours.
 
 ---
 
-## How Night Averages are Calculated
+## How Night Values Are Calculated
 
-Insight does not evaluate raw sensor spikes. Instead:
+For most metrics:
 
 1. Sensor data is averaged per hour
 2. Only hours within the night window are selected
 3. A simple arithmetic mean is computed per metric
 
-This ensures stable and robust nightly values.
+For **noise**, Insight counts **peak hours**: an hour is a peak if the maximum `noiseMax` sample in that hour is **> 45 dB**. The night card shows the number of such hours (not night-average dB).
 
 ---
 
@@ -181,27 +193,33 @@ WHO Air Quality Guidelines (2021), respiratory inflammation studies.
 
 ---
 
-### Noise
+### Noise (Peak Hours)
 
-Night noise contributes to micro-arousals even when not consciously perceived.
+Night noise contributes to micro-arousals even when not consciously perceived. Insight scores **how many hours** had a peak above **45 dB**, not the night-average level.
 
-| Model        | Threshold | Impact           |
-| ------------ | --------- | ---------------- |
-| Conservative | 35 dB     | −2.5% per +10 dB |
-| Biohacking   | 30 dB     | −3.5% per +10 dB |
+| Model        | Allowance (peak hours) | Impact per excess peak |
+| ------------ | ---------------------- | ---------------------- |
+| Conservative | 5                      | −2.0%                  |
+| Biohacking   | 1                      | −3.0%                  |
+
+```id="noise1"
+excess = max(0, peak_hours − allowance)
+impact = −pct_per_peak × excess
+```
 
 **Research basis:**
-WHO Environmental Noise Guidelines and sleep arousal literature.
+WHO Environmental Noise Guidelines and sleep arousal literature (peaks matter more than a smoothed average).
 
 ---
 
 ### Temperature
 
-Thermal conditions strongly influence sleep onset and continuity.
+Thermal conditions strongly influence sleep onset and continuity. Both an upper and a lower bound apply.
 
-| Model | Threshold     | Impact                         |
-| ----- | ------------- | ------------------------------ |
-| Both  | +25°C / +20°C | −1.5% per +1°C above threshold |
+| Model        | Comfort band | Impact                        |
+| ------------ | ------------ | ----------------------------- |
+| Conservative | 19–22°C      | −1.5% per °C outside the band |
+| Biohacking   | 17–20°C      | −1.5% per °C outside the band |
 
 **Research basis:**
 Sleep thermoregulation studies (Walker, WHOOP datasets, PMC research).
@@ -231,7 +249,7 @@ If your average CO₂ is 900 ppm:
 
 This is then combined with other metrics to form the final score.
 
-A score of **100** means all metrics stayed within ideal comfort ranges.
+A score of **100** means all metrics stayed within ideal comfort ranges (including noise peak allowance).
 
 ---
 
@@ -254,13 +272,15 @@ In the web interface you can configure:
 
 - Night start/end times
 - Urban sensor integration
+- disable opening of sleep analytics screen each morning
 
 ---
 
 ## Important Limitations
 
 - The device does not measure sleep stages or brain activity
-- Short spikes may not significantly affect hourly averages
+- Short spikes may not significantly affect hourly averages (temperature, humidity, CO₂, PM2.5)
+- Noise uses hourly max samples; very brief events can still register as a peak hour if `noiseMax` exceeds 45 dB
 - First-night data may be incomplete due to buffer initialization
 - The score is a sleep environment comfort signal, not a clinical assessment
 
