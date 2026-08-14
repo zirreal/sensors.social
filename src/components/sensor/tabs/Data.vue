@@ -1,11 +1,16 @@
 <template>
-  <div class="analytics-tab">
+  <div class="analytics-tab" :class="{ 'analytics-tab--demo': isDemo }">
 
-    <div class="panel">
-      <SensorPicker v-if="isSensorPickerReady" :point="point" :log="log" />
+    <div class="panel" :class="{ 'panel--demo': isDemo }">
+      <SensorPicker
+        v-if="isSensorPickerReady"
+        :point="point"
+        :log="log"
+        :variant="isDemo ? 'demo' : 'data'"
+      />
       <div v-else class="panel-skeleton panel-skeleton--trigger" aria-hidden="true" />
 
-      <Timeline :log="log" :point="point" />
+      <Timeline v-if="!isDemo" :log="log" :point="point" />
 
       <button
         v-if="ownerKey"
@@ -56,13 +61,20 @@
       </div>
     </div>
 
+    <DemoShowcase v-if="isDemo" part="metrics" :log="log" :point="point" />
+
+    <div v-if="isDemo" class="demo-timeline">
+      <Timeline :log="log" :point="point" />
+    </div>
 
     <section
       v-if="
+        !isDemo &&
         mapState.currentProvider.value !== 'realtime' &&
         mapState.timelineMode.value === 'day' &&
         isPMHealthy
       "
+      class="aqi-wrap"
     >
       <AQI :logs="log" />
     </section>
@@ -80,6 +92,7 @@
 
       <div v-if="chartHasData" class="chart-area" :class="{ 'chart-area--locked': showEncryptedLoginNotice }">
         <ChartHealthWarning
+          v-if="!isDemo"
           :log="log"
           :sensor-id="point?.sensor_id"
           :legend-key="chartActiveLegendKey"
@@ -119,7 +132,11 @@
       <div v-else-if="!chartHasData" class="chart-skeleton"></div>
     </section>
 
-    <section class="info-wrap">
+    <div v-if="isDemo" class="demo-footer">
+      <DemoShowcase part="summary" :log="log" :point="point" />
+    </div>
+
+    <section v-if="!isDemo" class="info-wrap">
       <div v-if="units && scales && scales.length > 0" class="scales-block">
         <p class="scales-title">{{ t("scales.title") }}</p>
         <div class="scalegrid">
@@ -192,6 +209,7 @@ import {
 } from "@/utils/sensorValueCrypto";
 
 import AQI from "../widgets/AQI.vue";
+import DemoShowcase from "../widgets/DemoShowcase.vue";
 import Chart from "../widgets/Chart.vue";
 import ChartHealthWarning from "../widgets/ChartHealthWarning.vue";
 import { LOG_GEO_ADDRESSES_KEY } from "@/composables/useLogGeoAddresses";
@@ -202,7 +220,13 @@ import Timeline from "../widgets/Timeline.vue";
 const props = defineProps({
   point: Object,
   log: Array,
+  variant: {
+    type: String,
+    default: "data",
+  },
 });
+
+const isDemo = computed(() => props.variant === "demo");
 
 const { t } = useI18n();
 const mapState = useMap();
@@ -439,6 +463,44 @@ watch(
   }
 }
 
+.analytics-tab--demo .chart-wrap {
+  margin-top: 0;
+}
+
+.demo-timeline {
+  container-type: inline-size;
+  container-name: sensor-panel;
+  margin: calc(var(--gap) * 1.15) 0 calc(var(--gap) * 0.35);
+}
+
+.demo-footer {
+  margin: calc(var(--gap) * 1.4) 0 0;
+}
+
+.panel--demo {
+  align-items: center;
+  margin-bottom: calc(var(--gap) * 1.15);
+}
+
+.analytics-tab--demo :deep(.panel-trigger--sensor) {
+  background: transparent;
+  border-color: transparent;
+  padding: 0;
+}
+
+.analytics-tab--demo :deep(.panel-trigger--sensor .panel-list__title) {
+  font-size: 1.12rem;
+  font-weight: 800;
+}
+
+.analytics-tab--demo :deep(.panel-trigger--sensor .panel-list__meta) {
+  font-size: 0.82rem;
+}
+
+.analytics-tab--demo :deep(.panel-trigger--sensor .panel-list__text) {
+  display: flex;
+  flex-direction: column;
+}
 
 /* - Top panel */
 .panel-trigger--owner {
@@ -456,6 +518,9 @@ watch(
 }
 /* - Top panel */
 
+.aqi-wrap {
+  margin-bottom: var(--gap);
+}
 
 .scales-block {
   margin-bottom: calc(var(--gap) * 2);
