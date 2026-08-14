@@ -93,8 +93,8 @@
     </div>
 
     <div class="scrollable-y">
-      <div v-show="activeTab === 'chart'" class="tab-content chart-tab">
-        <div v-if="latestStoryInPeriod" class="story-day">
+      <div v-show="activeTab === 'chart' || activeTab === 'demo'" class="tab-content" :class="activeTab === 'demo' ? 'demo-tab' : 'chart-tab'">
+        <div v-if="activeTab === 'chart' && latestStoryInPeriod" class="story-day">
           <div class="story-day__content">
             <div
               class="story-day-icon"
@@ -126,7 +126,7 @@
           </button>
         </div>
 
-        <Data :point="point" :log="log" />
+        <Data :point="point" :log="log" :variant="activeTab === 'demo' ? 'demo' : 'data'" />
       </div>
 
       <div v-if="isStoriesEnabled && isAccountsEnabled && activeTab === 'edit'" class="tab-content">
@@ -157,6 +157,16 @@
       >
         <font-awesome-icon icon="fa-solid fa-chart-line" />
         <span>Data</span>
+      </button>
+
+      <button
+        class="panel-button"
+        :class="{ active: activeTab === 'demo' }"
+        @click.prevent="activeTab = 'demo'"
+        :title="t('sensorpopup.demo_toggle')"
+      >
+        <font-awesome-icon icon="fa-solid fa-display" />
+        <span>{{ t("sensorpopup.demo") }}</span>
       </button>
 
       <button
@@ -243,7 +253,26 @@ const isAddressLoading = computed(
 );
 
 // Активная вкладка
-const activeTab = ref("chart");
+const TAB_STORAGE_KEY = "sensorPopupTab";
+
+function readStoredTab() {
+  try {
+    return localStorage.getItem(TAB_STORAGE_KEY) === "demo" ? "demo" : "chart";
+  } catch {
+    return "chart";
+  }
+}
+
+const activeTab = ref(readStoredTab());
+
+watch(activeTab, (tab) => {
+  if (tab !== "demo" && tab !== "chart") return;
+  try {
+    localStorage.setItem(TAB_STORAGE_KEY, tab);
+  } catch {
+    /* ignore quota / private mode */
+  }
+});
 
 // Проверяем, включен ли сервис accounts
 const isAccountsEnabled = computed(() => settings?.SERVICES?.accounts === true);
@@ -349,7 +378,7 @@ const sensorStoriesTotalCount = computed(() => {
 
 // Порядок табов для навигации клавиатурой (edit только если accounts включен)
 const tabsOrder = computed(() => {
-  const base = ["chart", "info", "sharelink"];
+  const base = ["chart", "demo", "info", "sharelink"];
   if (isAccountsEnabled.value) {
     base.push("edit");
   }
@@ -766,6 +795,10 @@ watch(
 
 .chart-tab {
   padding-top: calc(var(--tab-offset-y) * 0.65);
+}
+
+.demo-tab {
+  padding-top: calc(var(--gap) * 1.35);
 }
 
 .story-day {

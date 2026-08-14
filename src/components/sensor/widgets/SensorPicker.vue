@@ -10,8 +10,14 @@
       </div>
 
       <div class="panel-list__text">
-        <b class="panel-list__title">Sensor ({{ sensorTypeTitle(activeRow.type) }})</b>
-        <span class="panel-list__meta">{{ formatSensorIdShort(activeRow.sensorId) }}</span>
+        <b class="panel-list__title">
+          <template v-if="isDemo">{{ sensorTypeTitle(activeRow.type) }}</template>
+          <template v-else>Sensor ({{ sensorTypeTitle(activeRow.type) }})</template>
+        </b>
+        <span class="panel-list__meta">
+          <template v-if="isDemo">{{ t("sensorpopup.demo_live") }}</template>
+          <template v-else>{{ formatSensorIdShort(activeRow.sensorId) }}</template>
+        </span>
       </div>
 
       <font-awesome-icon icon="fa-solid fa-caret-down" class="panel-trigger__caret" aria-hidden="true" />
@@ -73,11 +79,16 @@ import {
 const props = defineProps({
   point: Object,
   log: Array,
+  variant: {
+    type: String,
+    default: "data",
+  },
 });
 
 const { t } = useI18n();
 const { switchOpenSensor } = useSensors();
 const popoverRef = ref(null);
+const isDemo = computed(() => props.variant === "demo");
 
 const rows = computed(() => buildSensorPickerRows(props.point, props.log));
 
