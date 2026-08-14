@@ -167,15 +167,28 @@ watch(
 </script>
 
 <style>
-/* Keep very tall infographic-like images on screen without scrolling */
-.blog-post__content img[src$="waterfall-party.webp"],
-.blog-post__content img[src$="vertical.webp"] {
-  width: 100%;
-  max-height: 80vh;
+/* Tall/portrait photos stay on screen; wide composites still fill the column */
+.blog-post__content img {
+  width: auto;
+  max-width: 100%;
+  max-height: min(80vh, 880px);
+  height: auto;
   object-fit: contain;
   display: block;
   margin-inline: auto;
+}
+
+.blog-post__content img[src$="waterfall-party.webp"],
+.blog-post__content img[src$="vertical.webp"] {
+  width: 100%;
   border: none;
+}
+
+/* Wide two-panel photos should fill the column, not shrink to the portrait cap */
+.blog-post .blog-img-wide > p > img {
+  width: 100%;
+  max-width: 100%;
+  max-height: none;
 }
 
 /* A QR code is read by a phone camera, not by eye, so it gains nothing from
