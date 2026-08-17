@@ -261,7 +261,6 @@
 <script setup>
 import { computed, ref, watch, inject, onBeforeUnmount } from "vue";
 import { useI18n } from "vue-i18n";
-import { useRoute, useRouter } from "vue-router";
 import { useMap } from "@/composables/useMap";
 import {
   useSensors,
@@ -309,8 +308,6 @@ const isDemo = computed({
 });
 
 const { t } = useI18n();
-const route = useRoute();
-const router = useRouter();
 const mapState = useMap();
 const accountStore = useAccounts();
 const localeComputed = computed(() => localStorage.getItem("locale") || "en");
@@ -395,9 +392,10 @@ function applySlide(index) {
   const i = ((index % slides.length) + slides.length) % slides.length;
   demoSlide.value = i;
   const slide = slides[i];
-  // Chart slides switch the map unit so Chart.vue shows that group.
+  // Switch the chart group locally. Do not touch the URL: setMapSettings(type)
+  // would refetch maxdata and rebuild every map marker on each slide.
   if (slide.kind === "chart" && slide.key) {
-    mapState.setMapSettings(route, router, { type: slide.key });
+    mapState.setCurrentUnit(slide.key);
   }
 }
 
