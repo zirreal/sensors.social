@@ -108,7 +108,7 @@ class Provider {
 
   watch(cb) {
     this.node.services.pubsub.subscribe(topic);
-    this.node.services.pubsub.addEventListener("message", async (evt) => {
+    const onMessage = async (evt) => {
       const sender = evt.detail.from.toString();
       if (!this.whiteListAccounts.includes(sender)) {
         // console.log(`skip from ${sender}`);
@@ -205,7 +205,11 @@ class Provider {
           // console.log(sensor_id, data);
         }
       }
-    });
+    };
+    this.node.services.pubsub.addEventListener("message", onMessage);
+    return () => {
+      this.node.services.pubsub.removeEventListener("message", onMessage);
+    };
   }
 }
 

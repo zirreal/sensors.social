@@ -1262,13 +1262,13 @@ export function getProvider() {
 }
 
 /**
- * Инициализирует провайдер по типу
+ * Инициализирует провайдер по типу.
+ * Live pubsub is started separately via ensureRealtimeSubscription.
  * @param {string} providerType - тип провайдера ('remote' или 'realtime')
- * @param {Function} onRealtimePoint - callback для realtime данных
- * @param {Function} onRemoteReady - callback для remote готовности
+ * @param {Function} [onRemoteReady] - callback для remote готовности
  * @returns {Promise<Object>} объект с результатом инициализации
  */
-export async function initProvider(providerType, onRealtimePoint = null, onRemoteReady = null) {
+export async function initProvider(providerType, onRemoteReady = null) {
   if (providerType === "remote") {
     setProvider(REMOTE_PROVIDER);
 
@@ -1288,40 +1288,35 @@ export async function initProvider(providerType, onRealtimePoint = null, onRemot
 
     await LIBP2P_PROVIDER.ready();
 
-    // Если передан callback для realtime, подписываемся
-    let unwatch = null;
-    if (onRealtimePoint) {
-      unwatch = subscribeRealtime(onRealtimePoint);
-    }
-
-    return { success: true, provider: LIBP2P_PROVIDER, unwatch };
+    // Live feed is owned by ensureRealtimeSubscription so day/week/month
+    // (remote map provider) still receive pubsub points.
+    return { success: true, provider: LIBP2P_PROVIDER };
   }
 
   return { success: false, provider: null };
 }
 
 /**
- * Подписывается на realtime данные
+ * Keep a libp2p pubsub listener even when the map uses the remote provider.
+ * @param {Function} onRealtimePoint - callback для обработки данных
+ * @returns {Promise<Function|null>} функция отписки
+ */
+export async function ensureRealtimeSubscription(onRealtimePoint) {
+  if (!onRealtimePoint) return null;
+  await LIBP2P_PROVIDER.ready();
+  return subscribeRealtime(onRealtimePoint);
+}
+
+/**
+ * Подписывается на realtime данные (libp2p), независимо от текущего map provider.
  * @param {Function} onRealtimePoint - callback для обработки данных
  * @returns {Function} функция отписки
  */
 export function subscribeRealtime(onRealtimePoint) {
-  if (providerObj && onRealtimePoint) {
-    return providerObj.watch(async (point) => {
-      await onRealtimePoint(point);
-    });
-  }
-  return null;
-}
-
-/**
- * Отписывается от realtime данных
- * @param {Function} unwatch - функция отписки
- */
-export function unsubscribeRealtime(unwatch) {
-  if (unwatch) {
-    unwatch();
-  }
+  if (!onRealtimePoint) return null;
+  return LIBP2P_PROVIDER.watch(async (point) => {
+    await onRealtimePoint(point);
+  });
 }
 
 let sensorCitiesCache = null;
@@ -1635,6 +1630,8 @@ export async function getCacheStats() {
  * @param {string} provider - тип провайдера
  * @param {Function} onRealtimePoint - callback для realtime данных
  * @param {AbortSignal} signal - сигнал для отмены запроса
+ * @param {Function} [progressCallback]
+ * @param {Object|null} [cacheMeta]
  * @returns {Promise<Array>} массив данных сенсора
  */
 export async function getSensorDataWithCache(

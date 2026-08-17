@@ -47,8 +47,8 @@ import MetaInfo from "../components/MetaInfo.vue";
 
 import { settings } from "@config";
 import {
-  unsubscribeRealtime,
   initProvider,
+  ensureRealtimeSubscription,
   OWNER_GEO_CLUSTER_KM,
   haversineKm,
   normalizeOwnerKey,
@@ -241,6 +241,18 @@ const handleMessageClick = (data) => {
 
 /* + Realtime watch */
 let unwatchRealtime = null;
+let liveFeedPromise = null;
+
+function startLiveFeed() {
+  if (unwatchRealtime) return Promise.resolve(unwatchRealtime);
+  if (!liveFeedPromise) {
+    liveFeedPromise = ensureRealtimeSubscription(onRealtimePoint).then((unwatch) => {
+      unwatchRealtime = unwatch;
+      return unwatch;
+    });
+  }
+  return liveFeedPromise;
+}
 
 // Callback для обработки realtime данных
 const onRealtimePoint = async (point) => {
@@ -256,27 +268,26 @@ const onRealtimePoint = async (point) => {
     streamData = await redecryptDataBag(sensorId, streamData, ownerAccount);
   }
 
-  // Обновляем данные для realtime
-  setSensorData(point.sensor_id, {
-    geo: point.geo,
-    model: point.model,
-    data: streamData,
-    // Keep owner in local state so realtime can use owner-bundling like daily recap.
-    owner: normalizeOwnerKey(point) || null,
-    device_model: point.device_model || null,
-    // Keep timestamp to pick a stable representative within an owner bundle.
-    timestamp: point.timestamp,
-  });
-
-  updateSensorMarker(point);
-
-  // Popup chart/logs: only while realtime tab is active (day/week use remote API logs).
-  if (
-    isSensorOpen(point.sensor_id) &&
+  const inRealtimeTab =
     mapState.currentProvider.value === "realtime" &&
-    mapState.timelineMode.value === "realtime"
-  ) {
-    const prevLogs = (Array.isArray(sensorPoint.value?.logs) ? sensorPoint.value.logs : [])
+    mapState.timelineMode.value === "realtime";
+
+  // Realtime map: keep the existing live marker/list feed.
+  if (inRealtimeTab) {
+    setSensorData(point.sensor_id, {
+      geo: point.geo,
+      model: point.model,
+      data: streamData,
+      owner: normalizeOwnerKey(point) || null,
+      device_model: point.device_model || null,
+      timestamp: point.timestamp,
+    });
+    updateSensorMarker(point);
+
+    if (!isSensorOpen(point.sensor_id)) return;
+
+    const prevPopup = sensorPoint.value;
+    const prevLogs = (Array.isArray(prevPopup?.logs) ? prevPopup.logs : [])
       .map((item) => {
         const ts = Number(item?.timestamp);
         if (!Number.isFinite(ts) || !item?.data) return null;
@@ -299,16 +310,11 @@ const onRealtimePoint = async (point) => {
         ? [...prevLogs, entry]
         : prevLogs;
 
-    // Обновляем sensorPoint с новыми данными
-    // Preserve owner bundle UI options (ownerSensorsWithData) while streaming realtime updates.
-    // Otherwise the owner dropdown can disappear intermittently.
-    const prevPopup = sensorPoint.value;
     const listOwner = sensorsList().find(
       (s) => String(s?.sensor_id || "") === String(point.sensor_id)
     );
     const nextPopupOwner =
       normalizeOwnerKey(point) || normalizeOwnerKey(listOwner) || normalizeOwnerKey(prevPopup) || null;
-
     const bundlePoint = {
       ...prevPopup,
       owner: nextPopupOwner,
@@ -328,22 +334,58 @@ const onRealtimePoint = async (point) => {
       logs: nextLogs,
       ...(ownerSensorsWithData?.length ? { ownerSensorsWithData } : null),
     };
+    return;
   }
+
+  if (!isSensorOpen(point.sensor_id)) return;
+  if (!Array.isArray(sensorPoint.value?.logs)) return;
+  if (!livePointInViewedPeriod(point.timestamp)) return;
+  appendLiveLogToPopup(point, streamData);
 };
 
+function appendLiveLogToPopup(point, streamData) {
+  const prevPopup = sensorPoint.value;
+  if (!prevPopup) return;
+  const prevLogs = Array.isArray(prevPopup.logs) ? prevPopup.logs : [];
+  const ts = Number(point?.timestamp);
+  if (!Number.isFinite(ts) || !streamData) return;
+  if (prevLogs.some((item) => Number(item?.timestamp) === ts)) return;
+
+  const entry = {
+    timestamp: ts,
+    data: streamData,
+    ...(hasValidCoordinates(point?.geo) ? { geo: point.geo } : null),
+  };
+
+  prevPopup.data = streamData;
+  prevPopup.timestamp = ts;
+  if (point.geo) prevPopup.geo = point.geo;
+  prevPopup.logs = [...prevLogs, entry];
+}
+
 /* - Realtime watch */
+
+function livePointInViewedPeriod(timestamp) {
+  const raw = Number(timestamp);
+  if (!Number.isFinite(raw)) return false;
+  const tsSec = String(Math.trunc(raw)).length >= 13 ? Math.floor(raw / 1000) : raw;
+  const date = mapState.currentDate.value;
+  const mode = mapState.timelineMode.value;
+  const { start, end } = getPeriodBounds(date, mode);
+  if (tsSec < start) return false;
+  if (String(date) === dayISO()) {
+    return tsSec <= Math.floor(Date.now() / 1000) + 120;
+  }
+  return !end || tsSec <= end;
+}
 
 /* ТУТ ИНИЦИАЛИЗАЦИЯ ПРОВАЙДЕРА */
 watch(
   () => mapState.currentProvider.value,
   async (newProvider) => {
     if (newProvider) {
-      // Отписываемся от старого провайдера, если он есть
-      unsubscribeRealtime(unwatchRealtime);
-      unwatchRealtime = null;
-
-      // Инициализируем новый провайдер
-      const result = await initProvider(newProvider, onRealtimePoint);
+      // Инициализируем новый провайдер (live pubsub is kept across remote/realtime)
+      const result = await initProvider(newProvider);
 
       if (!result.success) {
         mapState.setCurrentProvider("realtime");
@@ -351,10 +393,8 @@ watch(
         return;
       }
 
-      // Для realtime провайдера сохраняем функцию отписки
-      if (newProvider === "realtime" && result.unwatch) {
-        unwatchRealtime = result.unwatch;
-      }
+      // Do not block remote map load on libp2p; one listener is enough for all modes.
+      void startLiveFeed();
 
       // Check if AQI is selected in realtime mode and switch to PM2.5
       if (mapState.currentUnit.value === "aqi" && newProvider === "realtime") {
@@ -382,12 +422,6 @@ watch(
       mapState.currentProvider.value === "remote" &&
       (route.query.sensor || route.query.owner)
     ) {
-      // Отписываемся от realtime провайдера перед загрузкой новых данных
-      if (unwatchRealtime) {
-        unsubscribeRealtime(unwatchRealtime);
-        unwatchRealtime = null;
-      }
-
       const id = route.query.owner ? mapState.currentSensorId.value : route.query.sensor;
 
       // При смене периода очищаем логи и загружаем заново
@@ -476,12 +510,6 @@ watch(
 
     // Перезагружаем данные сенсоров при изменении даты (или timestamp-derived day), провайдера
     if (providerChanged || dateChanged || derivedDayChanged) {
-      // Отписываемся от realtime провайдера перед загрузкой новых данных
-      if (unwatchRealtime) {
-        unsubscribeRealtime(unwatchRealtime);
-        unwatchRealtime = null;
-      }
-
       const shellSensorId = route.query.sensor || sensorPoint.value?.sensor_id;
       if (shellSensorId && newQuery.provider === "realtime") {
         clearSensorLogs(shellSensorId);

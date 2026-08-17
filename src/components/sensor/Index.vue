@@ -92,9 +92,9 @@
       </button>
     </div>
 
-    <div class="scrollable-y">
-      <div v-show="activeTab === 'chart' || activeTab === 'demo'" class="tab-content" :class="activeTab === 'demo' ? 'demo-tab' : 'chart-tab'">
-        <div v-if="activeTab === 'chart' && latestStoryInPeriod" class="story-day">
+    <div class="scrollable-y" :class="{ 'scrollable-y--kiosk': isDemo && activeTab === 'chart' }">
+      <div v-show="activeTab === 'chart'" class="tab-content" :class="isDemo ? 'demo-tab' : 'chart-tab'">
+        <div v-if="!isDemo && latestStoryInPeriod" class="story-day">
           <div class="story-day__content">
             <div
               class="story-day-icon"
@@ -126,7 +126,7 @@
           </button>
         </div>
 
-        <Data :point="point" :log="log" :variant="activeTab === 'demo' ? 'demo' : 'data'" />
+        <Data :point="point" :log="log" v-model:demo="isDemo" />
       </div>
 
       <div v-if="isStoriesEnabled && isAccountsEnabled && activeTab === 'edit'" class="tab-content">
@@ -157,16 +157,6 @@
       >
         <font-awesome-icon icon="fa-solid fa-chart-line" />
         <span>Data</span>
-      </button>
-
-      <button
-        class="panel-button"
-        :class="{ active: activeTab === 'demo' }"
-        @click.prevent="activeTab = 'demo'"
-        :title="t('sensorpopup.demo_toggle')"
-      >
-        <font-awesome-icon icon="fa-solid fa-display" />
-        <span>{{ t("sensorpopup.demo") }}</span>
       </button>
 
       <button
@@ -254,21 +244,27 @@ const isAddressLoading = computed(
 
 // Активная вкладка
 const TAB_STORAGE_KEY = "sensorPopupTab";
+const DEMO_STORAGE_KEY = "sensorPopupDemo";
 
-function readStoredTab() {
+function readStoredDemo() {
   try {
-    return localStorage.getItem(TAB_STORAGE_KEY) === "demo" ? "demo" : "chart";
+    if (localStorage.getItem(TAB_STORAGE_KEY) === "demo") {
+      localStorage.setItem(DEMO_STORAGE_KEY, "1");
+      localStorage.setItem(TAB_STORAGE_KEY, "chart");
+      return true;
+    }
+    return localStorage.getItem(DEMO_STORAGE_KEY) === "1";
   } catch {
-    return "chart";
+    return false;
   }
 }
 
-const activeTab = ref(readStoredTab());
+const activeTab = ref("chart");
+const isDemo = ref(readStoredDemo());
 
-watch(activeTab, (tab) => {
-  if (tab !== "demo" && tab !== "chart") return;
+watch(isDemo, (on) => {
   try {
-    localStorage.setItem(TAB_STORAGE_KEY, tab);
+    localStorage.setItem(DEMO_STORAGE_KEY, on ? "1" : "0");
   } catch {
     /* ignore quota / private mode */
   }
@@ -378,7 +374,7 @@ const sensorStoriesTotalCount = computed(() => {
 
 // Порядок табов для навигации клавиатурой (edit только если accounts включен)
 const tabsOrder = computed(() => {
-  const base = ["chart", "demo", "info", "sharelink"];
+  const base = ["chart", "info", "sharelink"];
   if (isAccountsEnabled.value) {
     base.push("edit");
   }
@@ -514,6 +510,27 @@ watch(
   max-height: none;
   padding-left: var(--gap);
   padding-right: var(--gap);
+}
+
+.scrollable-y--kiosk {
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+}
+
+.scrollable-y--kiosk .demo-tab {
+  flex: 0 0 auto;
+  display: flex;
+  flex-direction: column;
+  min-height: auto;
+  padding-bottom: calc(var(--gap) * 1.1);
+}
+
+.scrollable-y--kiosk .demo-tab > * {
+  flex: 0 0 auto;
+  min-height: auto;
+  display: flex;
+  flex-direction: column;
 }
 
 .sensor-header {

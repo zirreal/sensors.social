@@ -1,12 +1,26 @@
-import { computed, toValue } from "vue";
+/**
+ * Demo preview readings for the sensor popup kiosk.
+ *
+ * Demo does not invent its own palette. Each value is matched to a zone in
+ * `src/measurements/<unit>.js` (same catalog as the map and the scales table).
+ * Zone `color` is a CSS variable from `src/assets/styles/variables.css`
+ * (`--measure-green`, `--measure-yellow`, …). DemoShowcase paints numbers,
+ * chips and progress bars with that token via `--zone-color`.
+ *
+ * `demoItems` — kiosk subset (indoor vs outdoor), with PM2.5 + PM10 merged
+ * into one Air quality card (`parts`). Call once from Data.vue and pass down.
+ */
+import { computed, ref, toValue, watch } from "vue";
 import { useI18n } from "vue-i18n";
 import measurements from "../measurements";
 import { findZoneForValue, zoneLabelForLocale } from "../measurements/tools";
+import { MEASUREMENT_GROUP_LOOKUP } from "@/measurements/groups";
 import { isEncryptedSensorValue } from "@/utils/sensorValueCrypto";
 import { resolveSensorType } from "@/composables/sensorDeviceTypes";
 
 const ZONE_SOURCE_ALIAS = { airtemp: "temperature" };
 
+/** Catalog order for the full `items` list (not the kiosk grid). */
 const DISPLAY_ORDER = [
   "pm25",
   "pm10",
@@ -23,6 +37,7 @@ const DISPLAY_ORDER = [
 
 const NOISE_KEYS = ["noisemax", "noiseavg", "noise"];
 
+/** First-screen card order. Outdoor ends with PM so Air quality can span the last row. */
 const DEMO_OUTDOOR_ORDER = [
   "temperature",
   "airtemp",
@@ -30,11 +45,13 @@ const DEMO_OUTDOOR_ORDER = [
   "noisemax",
   "noiseavg",
   "noise",
+  "pressure",
   "pm25",
   "pm10",
 ];
-const DEMO_INDOOR_ORDER = ["co2", "temperature", "airtemp", "humidity"];
+const DEMO_INDOOR_ORDER = ["co2", "temperature", "airtemp", "humidity", "pressure"];
 
+/** Font Awesome icons for demo cards only; map markers keep their own set. */
 const DEMO_ICONS = {
   pm25: "fa-solid fa-leaf",
   pm10: "fa-solid fa-leaf",
@@ -45,8 +62,10 @@ const DEMO_ICONS = {
   noise: "fa-solid fa-volume-high",
   noisemax: "fa-solid fa-volume-high",
   noiseavg: "fa-solid fa-volume-high",
+  pressure: "fa-solid fa-gauge-high",
 };
 
+/** One hint per zone index, aligned with `measurement.zones` in src/measurements/. */
 const DEMO_HINTS = {
   temperature: [
     { en: "Dress warmer", ru: "Оденьтесь теплее" },
@@ -84,8 +103,15 @@ const DEMO_HINTS = {
     { en: "Open a window", ru: "Откройте окно" },
     { en: "Leave the room", ru: "Выйдите ненадолго" },
   ],
+  pressure: [
+    { en: "Unsettled weather", ru: "Неустойчивая погода" },
+    { en: "All good", ru: "Всё в порядке" },
+    { en: "Clear weather", ru: "Ясная погода" },
+    { en: "Go easy", ru: "Берегите себя" },
+  ],
 };
 
+// Alias extra log keys to the hint lists above.
 DEMO_HINTS.airtemp = DEMO_HINTS.temperature;
 DEMO_HINTS.pm10 = DEMO_HINTS.pm25;
 DEMO_HINTS.noisemax = DEMO_HINTS.noise;
@@ -98,6 +124,7 @@ function hintForLocale(key, zoneIndex, loc) {
   return row?.[loc] || row?.en || "";
 }
 
+/** Fill % of the card track: position inside the current zone, then across all zones. */
 function zoneProgressPercent(measurement, value) {
   const zones = measurement?.zones;
   if (!Array.isArray(zones) || zones.length === 0) return 12;
@@ -130,17 +157,86 @@ function zoneProgressPercent(measurement, value) {
   return Math.max(12, Math.round(((index + t) / zones.length) * 100));
 }
 
-function latestBag(log, point) {
-  const logValue = toValue(log);
-  if (Array.isArray(logValue)) {
-    for (let i = logValue.length - 1; i >= 0; i -= 1) {
-      const data = logValue[i]?.data;
-      if (data && typeof data === "object") return data;
+function entryTimestamp(entry) {
+  const ts = Number(entry?.timestamp);
+  return Number.isFinite(ts) ? ts : -Infinity;
+}
+
+/** Log row with the latest timestamp (same edge the chart plots). */
+function latestLogEntry(logValue) {
+  if (!Array.isArray(logValue) || logValue.length === 0) return null;
+  let best = null;
+  let bestTs = -Infinity;
+  for (const entry of logValue) {
+    if (!entry?.data || typeof entry.data !== "object") continue;
+    const ts = entryTimestamp(entry);
+    if (ts >= bestTs) {
+      bestTs = ts;
+      best = entry;
     }
   }
-  const live = toValue(point)?.data;
-  if (live && typeof live === "object") return live;
-  return null;
+  return best;
+}
+
+/** Overlay numeric keys from `overlay` onto `base`; skip empty so sparse packets keep prior metrics. */
+function mergeNumericBag(base, overlay) {
+  const next = base && typeof base === "object" ? { ...base } : {};
+  if (!overlay || typeof overlay !== "object") {
+    return Object.keys(next).length ? next : null;
+  }
+  for (const [key, val] of Object.entries(overlay)) {
+    if (numericValue(val) == null) continue;
+    next[key] = val;
+  }
+  return Object.keys(next).length ? next : null;
+}
+
+/** Log row with the most numeric keys; tie-break by latest timestamp. */
+function fullestLogBag(logValue) {
+  if (!Array.isArray(logValue) || logValue.length === 0) return null;
+  let best = null;
+  let bestCount = -1;
+  let bestTs = -Infinity;
+  for (const entry of logValue) {
+    const data = entry?.data;
+    if (!data || typeof data !== "object") continue;
+    let count = 0;
+    for (const val of Object.values(data)) {
+      if (numericValue(val) != null) count += 1;
+    }
+    if (!count) continue;
+    const ts = entryTimestamp(entry);
+    if (count > bestCount || (count === bestCount && ts >= bestTs)) {
+      bestCount = count;
+      bestTs = ts;
+      best = data;
+    }
+  }
+  return best;
+}
+
+/**
+ * Current measurement bag for demo cards / now strip.
+ * Merge the fullest historical row + the latest row + live `point.data`.
+ * A pubsub tick often has fewer keys than a remote log row; using only the
+ * last row would drop PM and collapse the Air quality card (grid jump).
+ */
+function latestBag(log, point) {
+  const logValue = toValue(log);
+  const livePoint = toValue(point);
+  const live = livePoint?.data && typeof livePoint.data === "object" ? livePoint.data : null;
+  const entry = latestLogEntry(logValue);
+  const fromLog = entry?.data && typeof entry.data === "object" ? entry.data : null;
+
+  void livePoint?.timestamp;
+  void livePoint?._logsKey;
+  void livePoint?._decryptRev;
+  if (Array.isArray(logValue)) void logValue.length;
+  if (live) {
+    for (const key of Object.keys(live)) void live[key];
+  }
+
+  return mergeNumericBag(mergeNumericBag(fullestLogBag(logValue), fromLog), live);
 }
 
 function bagValue(bag, key) {
@@ -177,6 +273,7 @@ function sortByOrder(keys, order) {
   });
 }
 
+/** Keep first matching key per order; skip duplicate airtemp/noise variants. */
 function pickByOrder(items, order, limit = Infinity) {
   const picked = [];
   for (const key of order) {
@@ -190,6 +287,7 @@ function pickByOrder(items, order, limit = Infinity) {
   return picked;
 }
 
+/** Insight, or a CO2 sensor without PM → indoor kiosk layout (no Air quality card). */
 function isIndoorContext(items, point, log) {
   const type = resolveSensorType(toValue(point), toValue(log));
   if (type === "insight") return true;
@@ -198,7 +296,33 @@ function isIndoorContext(items, point, log) {
   return hasCo2 && !hasPm;
 }
 
-function asAirQualityPart(item) {
+export function isDemoPair(item) {
+  return Array.isArray(item?.parts) && item.parts.length > 1;
+}
+
+/** Flatten a card to the keys the carousel/chart can switch to. */
+export function demoItemKeys(item) {
+  if (isDemoPair(item)) return item.parts.map((part) => part.key);
+  return item?.key ? [item.key] : [];
+}
+
+/** One chart slide per measurement group (climate / dust / noise collapse to a single type). */
+export function demoChartTypes(items) {
+  const seen = new Set();
+  const types = [];
+  for (const item of items || []) {
+    for (const key of demoItemKeys(item)) {
+      if (key === "aqi") continue;
+      const group = MEASUREMENT_GROUP_LOOKUP[key] || key;
+      if (seen.has(group)) continue;
+      seen.add(group);
+      types.push(key);
+    }
+  }
+  return types;
+}
+
+export function asDemoPart(item) {
   return {
     key: item.key,
     name: item.shortName || item.name,
@@ -208,9 +332,11 @@ function asAirQualityPart(item) {
     color: item.color,
     progress: item.progress,
     hint: item.hint,
+    value: item.value,
   };
 }
 
+/** Fold PM2.5 + PM10 into one Air quality card. Header tint follows the worse zone. */
 function mergePmAsAirQuality(items, airQualityName) {
   const pm25 = items.find((row) => row.key === "pm25");
   const pm10 = items.find((row) => row.key === "pm10");
@@ -233,17 +359,41 @@ function mergePmAsAirQuality(items, airQualityName) {
       unit: primary.unit,
       progress: worst.progress,
       hint: worst.hint,
-      parts: sources.map(asAirQualityPart),
+      parts: sources.map(asDemoPart),
     },
   ];
 }
 
-export function useCurrentReadings(log, point) {
+function patchDemoItem(dst, src) {
+  dst.displayValue = src.displayValue;
+  dst.zoneLabel = src.zoneLabel;
+  dst.zoneIndex = src.zoneIndex;
+  dst.color = src.color;
+  dst.progress = src.progress;
+  dst.hint = src.hint;
+  dst.value = src.value;
+  dst.name = src.name;
+  dst.shortName = src.shortName;
+  dst.unit = src.unit;
+  if (!Array.isArray(src.parts) || !Array.isArray(dst.parts)) return;
+  // Never shrink the Air quality split — a 2-col card becoming 1-col reflows the grid.
+  const n = Math.min(dst.parts.length, src.parts.length);
+  for (let i = 0; i < n; i += 1) {
+    if (dst.parts[i]?.key === src.parts[i].key) patchDemoItem(dst.parts[i], src.parts[i]);
+  }
+}
+
+export function useDemoReadings(log, point) {
   const { t, locale } = useI18n();
   const localeCode = computed(() => localStorage.getItem("locale") || locale.value || "en");
 
+  const heldBag = ref(null);
+  const indoorLocked = ref(null);
+
+  const incomingBag = computed(() => latestBag(log, point));
+
   const items = computed(() => {
-    const bag = latestBag(log, point);
+    const bag = heldBag.value || incomingBag.value;
     if (!bag) return [];
 
     const loc = localeCode.value;
@@ -262,6 +412,7 @@ export function useCurrentReadings(log, point) {
       if (!measurement?.zones?.length) continue;
 
       const asNoise = NOISE_KEYS.includes(key);
+      // Zone table lives on the measurement module; hex values live in variables.css.
       const zone = findZoneForValue(measurement, value);
       const zoneLabel = zoneLabelForLocale(zone, loc);
       if (!zoneLabel) continue;
@@ -277,6 +428,8 @@ export function useCurrentReadings(log, point) {
         shortName,
         zoneLabel,
         zoneIndex,
+        value,
+        // Same token as the map / scales, e.g. `var(--measure-green)` from variables.css.
         color: zone?.color || "var(--measure-nodata)",
         displayValue: formatDisplayValue(measurement, value),
         unit: measurement.unit || "",
@@ -289,14 +442,77 @@ export function useCurrentReadings(log, point) {
     return rows;
   });
 
-  const indoor = computed(() => isIndoorContext(items.value, point, log));
+  const indoor = computed(() => {
+    if (indoorLocked.value != null) return indoorLocked.value;
+    return isIndoorContext(items.value, point, log);
+  });
 
-  const demoItems = computed(() =>
+  const liveDemoItems = computed(() =>
     mergePmAsAirQuality(
       pickByOrder(items.value, indoor.value ? DEMO_INDOOR_ORDER : DEMO_OUTDOOR_ORDER),
       t("sensorpopup.air_quality")
     )
   );
 
-  return { items, demoItems, indoor };
+  const demoItems = ref([]);
+
+  function resetHeld(id, prev) {
+    if (prev !== undefined && id !== prev) {
+      heldBag.value = null;
+      indoorLocked.value = null;
+      demoItems.value = [];
+    }
+  }
+
+  watch(
+    () => toValue(point)?.sensor_id,
+    resetHeld
+  );
+
+  watch(
+    incomingBag,
+    (next) => {
+      if (!next) return;
+      heldBag.value = mergeNumericBag(heldBag.value, next);
+    },
+    { immediate: true }
+  );
+
+  watch(
+    items,
+    (rows) => {
+      if (demoItems.value.length) return;
+      const hasPm = rows.some((row) => row.key === "pm25" || row.key === "pm10");
+      if (hasPm) {
+        indoorLocked.value = false;
+        return;
+      }
+      if (indoorLocked.value != null) return;
+      const guess = isIndoorContext(rows, point, log);
+      const hasCo2 = rows.some((row) => row.key === "co2");
+      if (guess || hasCo2) indoorLocked.value = true;
+    },
+    { immediate: true }
+  );
+
+  watch(
+    liveDemoItems,
+    (next) => {
+      if (!Array.isArray(next) || !next.length) return;
+      const cur = demoItems.value;
+      if (!cur.length) {
+        demoItems.value = next;
+        return;
+      }
+      // Freeze the first-screen grid: only paint new numbers onto existing cards.
+      const byKey = new Map(next.map((item) => [item.key, item]));
+      cur.forEach((dst) => {
+        const src = byKey.get(dst.key);
+        if (src) patchDemoItem(dst, src);
+      });
+    },
+    { immediate: true }
+  );
+
+  return { demoItems };
 }
