@@ -1,142 +1,210 @@
 <template>
   <div class="analytics-tab" :class="{ 'analytics-tab--demo': isDemo }">
-
     <div class="panel" :class="{ 'panel--demo': isDemo }">
-      <SensorPicker
-        v-if="isSensorPickerReady"
-        :point="point"
-        :log="log"
-        :variant="isDemo ? 'demo' : 'data'"
-      />
-      <div v-else class="panel-skeleton panel-skeleton--trigger" aria-hidden="true" />
+      <div class="panel-start">
+        <SensorPicker
+          v-if="isSensorPickerReady"
+          :point="point"
+          :log="log"
+          :variant="isDemo ? 'demo' : 'data'"
+        />
+        <div v-else class="panel-skeleton panel-skeleton--trigger" aria-hidden="true" />
+      </div>
 
       <Timeline v-if="!isDemo" :log="log" :point="point" />
 
-      <button
-        v-if="ownerKey"
-        type="button"
-        class="panel-trigger panel-trigger--owner"
-        popovertarget="data-owner-popover"
-      >
-        <div class="panel-list__media panel-list__media--round" aria-hidden="true">
-          <img v-if="ownerAvatar" :src="ownerAvatar" alt="" />
-        </div>
-        <div class="panel-list__text">
-          <b class="panel-list__title">{{ t("sensorpopup.infosensorowner") }}</b>
-          <span class="panel-list__meta">{{ formatSensorIdShort(ownerKey) }}</span>
-        </div>
-        <font-awesome-icon icon="fa-solid fa-caret-down" class="panel-trigger__caret" aria-hidden="true" />
-      </button>
-      <div v-else-if="isOwnerLoading && sensorType !== 'diy'" class="panel-skeleton panel-skeleton--trigger" aria-hidden="true" />
-      <div v-else-if="sensorType === 'diy'" class="panel-owner-spacer" aria-hidden="true" />
-      <div
-        v-else
-        class="panel-trigger panel-trigger--owner panel-trigger--placeholder"
-        aria-hidden="true"
-      >
-        <div class="panel-list__media panel-list__media--round" />
-        <div class="panel-list__text">
-          <b class="panel-list__title">{{ t("sensorpopup.infosensorowner") }}</b>
-          <span class="panel-list__meta">{{ ownerPlaceholderMeta }}</span>
-        </div>
-        <font-awesome-icon icon="fa-solid fa-caret-down" class="panel-trigger__caret" aria-hidden="true" />
-      </div>
-      <div id="data-owner-popover" class="popover panel-popover panel-popover--end" popover>
-        <div class="panel-list__item panel-list__item--static">
-          <div class="panel-list__media panel-list__media--round" aria-hidden="true">
-            <img v-if="ownerAvatar" :src="ownerAvatar" alt="" />
-          </div>
-          <div class="panel-list__text">
-            <b class="panel-list__title">{{ t("sensorpopup.infosensorowner") }}</b>
-            <span class="panel-list__meta">{{ formatSensorIdShort(ownerKey) }}</span>
-          </div>
-        </div>
-        <p v-if="isOwnerLoggedIn" class="panel-popover__footer">
-          {{ t("Share your insights with the community!") }}
-        </p>
-        <p v-else class="panel-popover__footer">
-          {{ t("To add info and stories") }}
-          <router-link to="/login/">{{ t("Login") }}</router-link>
-        </p>
-      </div>
-    </div>
-
-    <DemoShowcase v-if="isDemo" part="metrics" :log="log" :point="point" />
-
-    <div v-if="isDemo" class="demo-timeline">
-      <Timeline :log="log" :point="point" />
-    </div>
-
-    <section
-      v-if="
-        !isDemo &&
-        mapState.currentProvider.value !== 'realtime' &&
-        mapState.timelineMode.value === 'day' &&
-        isPMHealthy
-      "
-      class="aqi-wrap"
-    >
-      <AQI :logs="log" />
-    </section>
-
-    <section class="chart-wrap">
-      <div v-if="showLogsProgress" class="logs-progress">
-        <div class="logs-progress-bar">
-          <span :style="{ width: `${logsProgressPercent}%` }"></span>
-        </div>
-        <div class="logs-progress-meta">
-          <span>{{ logsProgressLabel }}</span>
-          <span>{{ timelineModeLabel }}</span>
-        </div>
-      </div>
-
-      <div v-if="chartHasData" class="chart-area" :class="{ 'chart-area--locked': showEncryptedLoginNotice }">
-        <ChartHealthWarning
-          v-if="!isDemo"
-          :log="log"
-          :sensor-id="point?.sensor_id"
-          :legend-key="chartActiveLegendKey"
-        />
-        <Chart
-          :log="log"
-          :log-revision="chartLogRevision"
-          :geo-addresses="chartGeoAddresses"
-          :show-geo-in-tooltip="showChartGeoInTooltip"
-          :address-for-timestamp="chartAddressForTimestamp"
-          @active-legend-change="chartActiveLegendKey = $event"
-        />
+      <div v-if="isDemo && chartHasData" class="demo-pager" :class="{ 'is-paused': demoPaused }">
         <div
-          v-if="showEncryptedLoginNotice"
-          class="chart-encrypted-overlay"
-          role="status"
-          aria-live="polite"
+          class="demo-pager__bar"
+          role="progressbar"
+          :aria-label="t('sensorpopup.demo_progress')"
+          :aria-valuemin="0"
+          :aria-valuemax="100"
+          :aria-valuenow="demoProgressNow"
         >
-          <div class="chart-encrypted-overlay__card">
+          <span
+            :key="`progress-top-${progressTick}-${demoSlide}`"
+            class="demo-pager__fill"
+            :style="{ '--demo-ms': `${demoDuration()}ms` }"
+          />
+        </div>
+        <div class="demo-pager__dots" role="tablist" :aria-label="t('sensorpopup.demo_pager')">
+          <button
+            v-for="(slide, index) in demoSlides"
+            :key="`${slide.kind}-${slide.key}`"
+            type="button"
+            class="demo-pager__dot"
+            :class="{
+              'is-on': demoSlide === index,
+              'is-done': demoSlide > index,
+            }"
+            :aria-label="demoSlideLabel(slide, index)"
+            :aria-selected="demoSlide === index ? 'true' : 'false'"
+            @click="goToSlide(index)"
+          />
+        </div>
+      </div>
+
+      <template v-if="!isDemo">
+        <div class="panel-end">
+          <button
+            v-if="ownerKey"
+            type="button"
+            class="panel-trigger panel-trigger--owner"
+            popovertarget="data-owner-popover"
+          >
+            <div class="panel-list__media panel-list__media--round" aria-hidden="true">
+              <img v-if="ownerAvatar" :src="ownerAvatar" alt="" />
+            </div>
+            <div class="panel-list__text">
+              <b class="panel-list__title">{{ t("sensorpopup.infosensorowner") }}</b>
+              <span class="panel-list__meta">{{ formatSensorIdShort(ownerKey) }}</span>
+            </div>
             <font-awesome-icon
-              icon="fa-solid fa-lock"
-              class="chart-encrypted-overlay__icon"
+              icon="fa-solid fa-caret-down"
+              class="panel-trigger__caret"
               aria-hidden="true"
             />
-            <p class="chart-encrypted-overlay__text">
-              {{ encryptedNoticeIsLogin ? t("sensorpopup.encrypted_login_notice") : t("sensorpopup.encrypted_decrypt_pending") }}
-            </p>
-            <router-link to="/login/" class="chart-encrypted-overlay__cta">
-              {{ t("Login") }}
-            </router-link>
+          </button>
+          <div
+            v-else-if="isOwnerLoading && sensorType !== 'diy'"
+            class="panel-skeleton panel-skeleton--trigger"
+            aria-hidden="true"
+          />
+          <div v-else-if="sensorType === 'diy'" class="panel-owner-spacer" aria-hidden="true" />
+          <div
+            v-else
+            class="panel-trigger panel-trigger--owner panel-trigger--placeholder"
+            aria-hidden="true"
+          >
+            <div class="panel-list__media panel-list__media--round" />
+            <div class="panel-list__text">
+              <b class="panel-list__title">{{ t("sensorpopup.infosensorowner") }}</b>
+              <span class="panel-list__meta">{{ ownerPlaceholderMeta }}</span>
+            </div>
+            <font-awesome-icon
+              icon="fa-solid fa-caret-down"
+              class="panel-trigger__caret"
+              aria-hidden="true"
+            />
           </div>
         </div>
-      </div>
-      <div v-else-if="showNoDataMessage" class="no-data-message">
-        {{ $t("No data available") }}
-      </div>
-      <div v-else-if="!chartHasData" class="chart-skeleton"></div>
-    </section>
-
-    <div v-if="isDemo" class="demo-footer">
-      <DemoShowcase part="summary" :log="log" :point="point" />
+        <div id="data-owner-popover" class="popover panel-popover panel-popover--end" popover>
+          <div class="panel-list__item panel-list__item--static">
+            <div class="panel-list__media panel-list__media--round" aria-hidden="true">
+              <img v-if="ownerAvatar" :src="ownerAvatar" alt="" />
+            </div>
+            <div class="panel-list__text">
+              <b class="panel-list__title">{{ t("sensorpopup.infosensorowner") }}</b>
+              <span class="panel-list__meta">{{ formatSensorIdShort(ownerKey) }}</span>
+            </div>
+          </div>
+          <p v-if="isOwnerLoggedIn" class="panel-popover__footer">
+            {{ t("Share your insights with the community!") }}
+          </p>
+          <p v-else class="panel-popover__footer">
+            {{ t("To add info and stories") }}
+            <router-link to="/login/">{{ t("Login") }}</router-link>
+          </p>
+        </div>
+      </template>
     </div>
 
-    <section v-if="!isDemo" class="info-wrap">
+    <div v-if="isDemo && demoScreen === 'readings'" class="demo-stage">
+      <section class="demo-screen demo-screen--readings">
+        <DemoShowcase part="metrics" :items="demoItems" />
+      </section>
+    </div>
+
+    <template v-if="!isDemo || demoScreen === 'charts'">
+      <section
+        v-if="
+          !isDemo &&
+          mapState.currentProvider.value !== 'realtime' &&
+          mapState.timelineMode.value === 'day' &&
+          isPMHealthy
+        "
+        class="aqi-wrap"
+      >
+        <AQI :logs="log" />
+      </section>
+
+      <section class="chart-wrap">
+        <div v-if="showLogsProgress" class="logs-progress">
+          <div class="logs-progress-bar">
+            <span :style="{ width: `${logsProgressPercent}%` }"></span>
+          </div>
+          <div class="logs-progress-meta">
+            <span>{{ logsProgressLabel }}</span>
+            <span>{{ timelineModeLabel }}</span>
+          </div>
+        </div>
+
+        <div
+          v-if="chartHasData"
+          class="chart-area"
+          :class="{ 'chart-area--locked': showEncryptedLoginNotice }"
+        >
+          <ChartHealthWarning
+            v-if="!isDemo"
+            :log="log"
+            :sensor-id="point?.sensor_id"
+            :legend-key="chartActiveLegendKey"
+          />
+          <Chart
+            :log="log"
+            :log-revision="chartLogRevision"
+            :geo-addresses="chartGeoAddresses"
+            :show-geo-in-tooltip="showChartGeoInTooltip"
+            :address-for-timestamp="chartAddressForTimestamp"
+            @active-legend-change="chartActiveLegendKey = $event"
+          />
+          <div
+            v-if="showEncryptedLoginNotice"
+            class="chart-encrypted-overlay"
+            role="status"
+            aria-live="polite"
+          >
+            <div class="chart-encrypted-overlay__card">
+              <font-awesome-icon
+                icon="fa-solid fa-lock"
+                class="chart-encrypted-overlay__icon"
+                aria-hidden="true"
+              />
+              <p class="chart-encrypted-overlay__text">
+                {{
+                  encryptedNoticeIsLogin
+                    ? t("sensorpopup.encrypted_login_notice")
+                    : t("sensorpopup.encrypted_decrypt_pending")
+                }}
+              </p>
+              <router-link to="/login/" class="chart-encrypted-overlay__cta">
+                {{ t("Login") }}
+              </router-link>
+            </div>
+          </div>
+        </div>
+        <div v-else-if="showNoDataMessage" class="no-data-message">
+          {{ $t("No data available") }}
+        </div>
+        <div v-else-if="!chartHasData" class="chart-skeleton"></div>
+      </section>
+
+      <DemoShowcase v-if="isDemo" part="now" :items="demoItems" />
+    </template>
+
+    <label v-if="chartHasData" class="demo-switch" :title="t('sensorpopup.demo_toggle')">
+      <input
+        v-model="isDemo"
+        type="checkbox"
+        role="switch"
+        :aria-label="t('sensorpopup.demo_toggle')"
+      />
+      <span class="demo-switch__track" aria-hidden="true"></span>
+      <span class="demo-switch__text">{{ t("sensorpopup.demo") }}</span>
+    </label>
+
+    <section v-if="!isDemo || demoScreen === 'readings'" class="info-wrap">
       <div v-if="units && scales && scales.length > 0" class="scales-block">
         <p class="scales-title">{{ t("scales.title") }}</p>
         <div class="scalegrid">
@@ -171,7 +239,7 @@
       </div>
 
       <div
-        v-if="showLogsHealthUserhideNotice"
+        v-if="!isDemo && showLogsHealthUserhideNotice"
         class="logs-health-warning-banner logs-health-userhide-notice"
       >
         <div>
@@ -182,7 +250,7 @@
         </div>
       </div>
 
-      <p class="textsmall" v-if="hasLogs">
+      <p class="textsmall" v-if="!isDemo && hasLogs">
         <template v-if="isRussia">{{ t("notice_with_fz") }}</template>
         <template v-else>{{ t("notice_without_fz") }}</template>
       </p>
@@ -191,10 +259,18 @@
 </template>
 
 <script setup>
-import { computed, ref, watch, inject } from "vue";
+import { computed, ref, watch, inject, onBeforeUnmount } from "vue";
 import { useI18n } from "vue-i18n";
+import { useRoute, useRouter } from "vue-router";
 import { useMap } from "@/composables/useMap";
-import { useSensors, formatSensorIdShort, isPanelSensorPickerReady, isPanelOwnerLoading, resolveSensorType, isOwnerAccountLoggedIn } from "@/composables/useSensors";
+import {
+  useSensors,
+  formatSensorIdShort,
+  isPanelSensorPickerReady,
+  isPanelOwnerLoading,
+  resolveSensorType,
+  isOwnerAccountLoggedIn,
+} from "@/composables/useSensors";
 import { useAccounts } from "@/composables/useAccounts";
 import { getAvatar } from "@/utils/avatarGenerator";
 import {
@@ -203,10 +279,9 @@ import {
   useLogsHealth,
 } from "@/utils/calculations/sensor/logs_health.js";
 import measurements from "../../../measurements";
-import {
-  bagHasEncryptedForLegend,
-  logHasEncryptedForLegend,
-} from "@/utils/sensorValueCrypto";
+import { MEASUREMENT_GROUP_LOOKUP, MEASUREMENT_GROUPS } from "@/measurements/groups";
+import { bagHasEncryptedForLegend, logHasEncryptedForLegend } from "@/utils/sensorValueCrypto";
+import { useDemoReadings, demoChartTypes } from "@/composables/useDemoReadings";
 
 import AQI from "../widgets/AQI.vue";
 import DemoShowcase from "../widgets/DemoShowcase.vue";
@@ -220,15 +295,22 @@ import Timeline from "../widgets/Timeline.vue";
 const props = defineProps({
   point: Object,
   log: Array,
-  variant: {
-    type: String,
-    default: "data",
+  demo: {
+    type: Boolean,
+    default: false,
   },
 });
 
-const isDemo = computed(() => props.variant === "demo");
+const emit = defineEmits(["update:demo"]);
+
+const isDemo = computed({
+  get: () => props.demo,
+  set: (value) => emit("update:demo", Boolean(value)),
+});
 
 const { t } = useI18n();
+const route = useRoute();
+const router = useRouter();
 const mapState = useMap();
 const accountStore = useAccounts();
 const localeComputed = computed(() => localStorage.getItem("locale") || "en");
@@ -247,6 +329,144 @@ const isSensorPickerReady = computed(() => isPanelSensorPickerReady(props.point)
 const isOwnerLoading = computed(() => isPanelOwnerLoading(props.point));
 const sensorType = computed(() => resolveSensorType(props.point, props.log));
 
+const { demoItems } = useDemoReadings(
+  () => props.log,
+  () => props.point
+);
+
+// Carousel: screen 0 = metric cards (15s), then one chart per group (5s each).
+const DEMO_SCREEN_MS = 15000;
+const DEMO_CHART_MS = 5000;
+const demoSlide = ref(0);
+const progressTick = ref(0);
+const demoPaused = ref(false);
+let demoTimer = 0;
+
+const demoSlides = computed(() => {
+  // Dust/climate/noise collapse to one slide each (see demoChartTypes).
+  const types = demoChartTypes(demoItems.value);
+  return [{ kind: "readings", key: "readings" }, ...types.map((key) => ({ kind: "chart", key }))];
+});
+
+const demoScreen = computed(() => (demoSlide.value === 0 ? "readings" : "charts"));
+
+function demoDuration(index = demoSlide.value) {
+  return index === 0 ? DEMO_SCREEN_MS : DEMO_CHART_MS;
+}
+
+const demoProgressNow = computed(() => {
+  const total = demoSlides.value.length;
+  if (!total) return 0;
+  return Math.round(((demoSlide.value + 1) / total) * 100);
+});
+
+function demoSlideLabel(slide, index) {
+  const total = demoSlides.value.length;
+  const n = t("sensorpopup.demo_screen_n", { current: index + 1, total });
+  if (slide.kind === "readings") {
+    return `${t("sensorpopup.demo_screen_readings")}, ${n}`;
+  }
+  const group = MEASUREMENT_GROUP_LOOKUP[slide.key];
+  const groupLabel =
+    group && MEASUREMENT_GROUPS[group]?.labelKey ? t(MEASUREMENT_GROUPS[group].labelKey) : "";
+  const meta = measurements[slide.key];
+  const loc = localeComputed.value;
+  const name =
+    groupLabel ||
+    meta?.nameshort?.[loc] ||
+    meta?.nameshort?.en ||
+    t("sensorpopup.demo_screen_charts");
+  return `${name}, ${n}`;
+}
+
+function stopDemoCarousel() {
+  window.clearTimeout(demoTimer);
+  demoTimer = 0;
+}
+
+function queueDemo(fn, ms) {
+  stopDemoCarousel();
+  demoTimer = window.setTimeout(fn, ms);
+}
+
+function applySlide(index) {
+  const slides = demoSlides.value;
+  if (!slides.length) return;
+  const i = ((index % slides.length) + slides.length) % slides.length;
+  demoSlide.value = i;
+  const slide = slides[i];
+  // Chart slides switch the map unit so Chart.vue shows that group.
+  if (slide.kind === "chart" && slide.key) {
+    mapState.setMapSettings(route, router, { type: slide.key });
+  }
+}
+
+function restartProgress() {
+  progressTick.value += 1;
+}
+
+function goToSlide(index) {
+  applySlide(index);
+  restartProgress();
+  if (!document.hidden && isDemo.value) queueDemo(nextSlide, demoDuration());
+}
+
+function nextSlide() {
+  goToSlide(demoSlide.value + 1);
+}
+
+function startDemoCarousel() {
+  stopDemoCarousel();
+  if (!isDemo.value) return;
+  applySlide(demoSlide.value);
+  restartProgress();
+  if (document.hidden) {
+    demoPaused.value = true;
+    return;
+  }
+  demoPaused.value = false;
+  queueDemo(nextSlide, demoDuration());
+}
+
+function onDemoVisibility() {
+  if (document.hidden) {
+    demoPaused.value = true;
+    stopDemoCarousel();
+    return;
+  }
+  startDemoCarousel();
+}
+
+watch(
+  isDemo,
+  (on) => {
+    if (on) {
+      demoSlide.value = 0;
+      startDemoCarousel();
+      document.addEventListener("visibilitychange", onDemoVisibility);
+    } else {
+      stopDemoCarousel();
+      document.removeEventListener("visibilitychange", onDemoVisibility);
+      demoSlide.value = 0;
+      demoPaused.value = false;
+    }
+  },
+  { immediate: true }
+);
+
+watch(
+  () => demoSlides.value.length,
+  (len) => {
+    if (!isDemo.value || !len) return;
+    if (demoSlide.value >= len) goToSlide(0);
+  }
+);
+
+onBeforeUnmount(() => {
+  stopDemoCarousel();
+  document.removeEventListener("visibilitychange", onDemoVisibility);
+});
+
 const isOwnerLoggedIn = computed(() => {
   const accounts = Array.isArray(accountStore.accounts?.value) ? accountStore.accounts.value : [];
   return isOwnerAccountLoggedIn(accounts, ownerKey.value, props.point?.sensor_id);
@@ -260,9 +480,7 @@ watch(
   { immediate: true }
 );
 
-const chartLogRevision = computed(
-  () => props.point?._decryptRev ?? props.point?._logsKey ?? ""
-);
+const chartLogRevision = computed(() => props.point?._decryptRev ?? props.point?._logsKey ?? "");
 
 const chartActiveLegendKey = ref(null);
 
@@ -288,7 +506,6 @@ const showEncryptedLoginNotice = computed(() => {
 const encryptedNoticeIsLogin = computed(
   () => showEncryptedLoginNotice.value && !isOwnerLoggedIn.value
 );
-
 
 const logsHealthSensorUserHide = computed(() =>
   Boolean(
@@ -463,23 +680,285 @@ watch(
   }
 }
 
+.analytics-tab--demo {
+  display: flex;
+  flex-direction: column;
+  position: relative;
+}
+
+.demo-stage {
+  flex: 0 0 auto;
+  position: relative;
+}
+
+.demo-screen--readings {
+  display: flex;
+  flex-direction: column;
+  gap: calc(var(--gap) * 0.85);
+}
+
+.demo-screen--readings :deep(.demo-board) {
+  flex: 0 0 auto;
+}
+
+.demo-screen--readings :deep(.demo-metrics) {
+  align-content: start;
+}
+
+/* Header pager: inactive gray from --color-dark, fill/active from --color-blue. */
+.demo-pager {
+  --pager-inactive: color-mix(in srgb, var(--color-dark) 14%, transparent);
+  --pager-track: color-mix(in srgb, var(--color-dark) 10%, transparent);
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  justify-self: stretch;
+  align-self: center;
+  gap: 0.35rem;
+  width: 100%;
+  min-width: 0;
+}
+
+.demo-pager__bar {
+  width: 100%;
+  height: 4px;
+  overflow: hidden;
+  border-radius: 999px;
+  background: var(--pager-track);
+}
+
+.demo-pager__fill {
+  display: block;
+  width: 0;
+  height: 100%;
+  border-radius: inherit;
+  background: var(--color-blue);
+  animation: demo-pager-fill var(--demo-ms, 5s) linear forwards;
+}
+
+.demo-pager.is-paused .demo-pager__fill {
+  animation-play-state: paused;
+}
+
+@keyframes demo-pager-fill {
+  to {
+    width: 100%;
+  }
+}
+
+.demo-pager__dots {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  align-items: center;
+  gap: 0.2rem;
+}
+
+.demo-pager__dot {
+  display: grid;
+  place-items: center;
+  width: 1.45rem;
+  height: 1.45rem;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  cursor: pointer;
+}
+
+.demo-pager__dot::after {
+  content: "";
+  width: 0.42rem;
+  height: 0.42rem;
+  border-radius: 999px;
+  background: var(--pager-inactive);
+  transition:
+    width 0.28s ease,
+    height 0.28s ease,
+    background-color 0.28s ease,
+    transform 0.28s ease;
+}
+
+.demo-pager__dot.is-done::after {
+  background: color-mix(in srgb, var(--color-blue) 55%, var(--pager-inactive));
+}
+
+.demo-pager__dot.is-on::after {
+  width: 1.15rem;
+  height: 0.42rem;
+  background: var(--color-blue);
+}
+
+.demo-pager__dot:hover::after {
+  transform: scale(1.18);
+}
+
+.demo-pager__dot.is-on:hover::after {
+  transform: none;
+}
+
+.demo-pager__dot:focus-visible {
+  outline: 2px solid var(--color-blue);
+  outline-offset: 1px;
+  border-radius: 999px;
+}
+
+@media screen and (max-width: 900px) {
+  .demo-pager {
+    gap: 0.5rem;
+  }
+
+  .demo-pager__bar {
+    height: 8px;
+  }
+
+  .demo-pager__dots {
+    gap: 0.28rem;
+  }
+
+  .demo-pager__dot {
+    width: 2.55rem;
+    height: 2.55rem;
+  }
+
+  .demo-pager__dot::after {
+    width: 0.78rem;
+    height: 0.78rem;
+  }
+
+  .demo-pager__dot.is-on::after {
+    width: 1.9rem;
+    height: 0.78rem;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .demo-pager__fill {
+    animation: none;
+    width: 100%;
+    opacity: 0.45;
+  }
+
+  .demo-pager__dot::after {
+    transition: none;
+  }
+
+  .demo-pager__dot.is-on::after {
+    width: 0.78rem;
+  }
+}
+
 .analytics-tab--demo .chart-wrap {
   margin-top: 0;
+  flex: 0 1 auto;
+  min-height: 0;
 }
 
-.demo-timeline {
-  container-type: inline-size;
-  container-name: sensor-panel;
-  margin: calc(var(--gap) * 1.15) 0 calc(var(--gap) * 0.35);
-}
-
-.demo-footer {
-  margin: calc(var(--gap) * 1.4) 0 0;
+.analytics-tab--demo :deep(.demo-now) {
+  flex: 0 0 auto;
+  min-width: 0;
+  max-width: 100%;
+  margin-top: var(--gap);
 }
 
 .panel--demo {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(9rem, 18rem);
   align-items: center;
+  column-gap: 1.25rem;
   margin-bottom: calc(var(--gap) * 1.15);
+}
+
+@media screen and (max-width: 560px) {
+  .panel--demo {
+    grid-template-columns: minmax(0, 1fr);
+    row-gap: 0.7rem;
+  }
+}
+
+.panel-start {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 0.45rem;
+  flex: 0 0 auto;
+  max-width: 100%;
+}
+
+.panel-start :deep(.sensor-picker),
+.panel-start :deep(.panel-trigger--sensor) {
+  max-width: 100%;
+}
+
+.panel-end {
+  display: flex;
+  align-items: flex-start;
+  justify-content: flex-end;
+  flex: 0 0 auto;
+  max-width: 100%;
+}
+
+.demo-switch {
+  display: flex;
+  align-items: center;
+  align-self: flex-end;
+  gap: 0.4rem;
+  width: fit-content;
+  margin-top: calc(var(--gap) * 1.75);
+  margin-left: auto;
+  cursor: pointer;
+  user-select: none;
+}
+
+.demo-switch input {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+}
+
+.demo-switch__track {
+  position: relative;
+  width: 2rem;
+  height: 1.15rem;
+  flex: 0 0 auto;
+  border: 1px solid var(--surface-border);
+  border-radius: 999px;
+  background: var(--color-light-gray);
+  transition: background-color 0.15s ease, border-color 0.15s ease;
+}
+
+.demo-switch__track::after {
+  content: "";
+  position: absolute;
+  top: 1px;
+  left: 1px;
+  width: 0.85rem;
+  height: 0.85rem;
+  border-radius: 50%;
+  background: var(--color-light);
+  border: 1px solid var(--surface-border-soft);
+  transition: transform 0.15s ease;
+}
+
+.demo-switch input:checked + .demo-switch__track {
+  background: color-mix(in srgb, var(--color-link) 28%, var(--color-light));
+  border-color: var(--color-link);
+}
+
+.demo-switch input:checked + .demo-switch__track::after {
+  transform: translateX(0.82rem);
+}
+
+.demo-switch input:focus-visible + .demo-switch__track {
+  outline: 2px solid var(--color-link);
+  outline-offset: 2px;
+}
+
+.demo-switch__text {
+  font-size: 0.82rem;
+  font-weight: 600;
+  line-height: 1;
 }
 
 .analytics-tab--demo :deep(.panel-trigger--sensor) {
@@ -653,7 +1132,6 @@ watch(
   filter: brightness(0.95);
 }
 
-
 .logs-health-warning-banner {
   padding: var(--gap);
   border-radius: var(--radius-sm);
@@ -684,7 +1162,7 @@ watch(
 }
 
 .info-wrap {
-  margin-top: calc(var(--gap) * 3);
+  margin-top: calc(var(--gap) * 1.25);
   display: flex;
   flex-direction: column;
   gap: var(--gap);
@@ -692,9 +1170,8 @@ watch(
 
 @media screen and (width < 500px) {
   .info-wrap {
-    margin-top: calc(var(--gap) * 5);
-    gap: calc(var(--gap) * 2);
+    margin-top: calc(var(--gap) * 1.75);
+    gap: calc(var(--gap) * 1.5);
   }
 }
 </style>
-
