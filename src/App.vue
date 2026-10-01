@@ -1,5 +1,17 @@
 <template>
-  <div class="maintenance-banner">Technical maintenance: some sensors may be temporarily unavailable. <a href="/support" class="link">Support</a></div>
+  <div v-if="route.name !== 'altruist-timeline'" class="maintenance-banner">
+    <router-link to="/altruist-timeline/" class="maintenance-banner-link">
+      <span
+        >{{ $t("We've updated the Altruist timeline") }}
+        <i>[{{ $t("See what 8 years of our work look like") }}]</i></span
+      >
+      <font-awesome-icon
+        icon="fa-solid fa-arrow-right"
+        class="maintenance-banner-arrow"
+        aria-hidden="true"
+      />
+    </router-link>
+  </div>
   <RouterView />
   <notifications :classes="['notify', 'vue-notification']" />
 </template>
@@ -129,19 +141,9 @@ onMounted(async () => {
   text-align: center;
   padding: 0.5rem var(--gap);
   box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
-  font-weight: 900;
-  font-size: 0.9rem;
 }
 
-.link {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  color: var(--color-light);
-  text-decoration: underline;
-}
-
-/* .maintenance-banner-link {
+.maintenance-banner-link {
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -149,8 +151,11 @@ onMounted(async () => {
   width: 100%;
   color: var(--color-light);
   text-decoration: none;
+  font-size: 0.9rem;
+  font-weight: 700;
   transition: opacity 0.2s ease;
-} */
+  font-weight: 900;
+}
 
 .maintenance-banner-link:hover {
   color: var(--color-light);
