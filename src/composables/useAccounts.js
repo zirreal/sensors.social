@@ -110,7 +110,18 @@ async function fetchOwnerSensorsNetwork(owner) {
     return data;
   };
 
-  // Roseman v2: owner → device ids
+  try {
+    const v3Url = `${base}/api/v3/sensors/${encodeURIComponent(key)}`;
+    const v3Result = await fetchJson(v3Url, { cache: "default" });
+    const v3Data = parseSensorIds(v3Result);
+    if (v3Data.length > 0) return remember(v3Data);
+  } catch (error) {
+    if (!String(error?.message || "").includes("HTTP 404")) {
+      console.warn("getUserSensors v3 error:", error);
+    }
+  }
+
+  // Deprecated v2, then older providers
   try {
     const v2Url = `${base}/api/v2/sensor/owner/${encodeURIComponent(key)}`;
     const v2Result = await fetchJson(v2Url, { cache: "default" });
@@ -122,7 +133,6 @@ async function fetchOwnerSensorsNetwork(owner) {
     }
   }
 
-  // Legacy fallback (older providers)
   const legacyUrl = `${base}/api/sensor/sensors/${encodeURIComponent(key)}`;
   try {
     const legacyResult = await fetchJson(legacyUrl, { cache: "default" });

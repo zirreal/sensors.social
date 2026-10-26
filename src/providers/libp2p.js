@@ -11,7 +11,12 @@ import { decodeSignedEnvelopeToPoint, decryptProtoPrivate } from "../utils/proto
 import { useAccounts } from "@/composables/useAccounts";
 
 const topic = "airalab.lighthouse.5.robonomics.eth";
-const protoTopic = "sensors.social/v1/staging";
+const protoTopics = ["sensors.social/v1/staging", "sensors.social/v1"];
+
+function isProtoTopic(msgTopic) {
+  const t = String(msgTopic || "");
+  return protoTopics.some((topicName) => t === topicName || t.endsWith(`/${topicName}`));
+}
 
 function accountHasSecret(account) {
   return Boolean(
@@ -128,7 +133,9 @@ class Provider {
 
   watch(cb) {
     this.node.services.pubsub.subscribe(topic);
-    this.node.services.pubsub.subscribe(protoTopic);
+    for (const protoTopic of protoTopics) {
+      this.node.services.pubsub.subscribe(protoTopic);
+    }
 
     const upsertHistoryPoint = (sensorId, point) => {
       const sid = String(sensorId || "");
@@ -196,7 +203,7 @@ class Provider {
       const raw = evt.detail.data;
       const msgTopic = String(evt.detail.topic || "");
 
-      if (msgTopic === protoTopic || msgTopic.endsWith(protoTopic)) {
+      if (isProtoTopic(msgTopic)) {
         await handleProto(raw, sender);
         return;
       }

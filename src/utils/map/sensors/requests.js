@@ -6,8 +6,13 @@ import { dayISO, dayBoundsUnix, timelineFetchBounds } from "../../date";
 import { mapLayerUnitIds, sortMapLayerUnits } from "../../../measurements/tools";
 import { settings, excluded_sensors } from "@config";
 import { decryptMeasurementBag } from "@/utils/sensorValueCrypto";
-import { decodeSignedEnvelopeBatchToPoints, decryptProtoPrivate } from "@/utils/proto/decodeEnvelope";
-import { canonicalSensorId, sensorIdToHex, sensorIdToSs58 } from "@/utils/sensorId";
+import { decryptProtoPrivate } from "@/utils/proto/decodeEnvelope";
+import { canonicalSensorId, sensorIdToHex } from "@/utils/sensorId";
+import {
+  fetchRosemanV3SensorPoints,
+  protoPointsToHistory,
+  rosemanApiBase,
+} from "./rosemanV3";
 
 // Глобальные константы провайдеров
 const REMOTE_PROVIDER = new Provider(settings.REMOTE_PROVIDER);
@@ -79,12 +84,30 @@ export function sensorFetchBoundsForDate(isoDate) {
   return timelineFetchBounds(isoDate, "day");
 }
 
-function rosemanApiBase(url) {
-  return String(url || "").replace(/\/?$/, "/");
+function historyPayloadFromProtoLogs(sensorId, logs) {
+  const sid = canonicalSensorId(sensorId) || String(sensorId || "").trim();
+  const last = Array.isArray(logs) && logs.length > 0 ? logs[logs.length - 1] : null;
+  return {
+    result: Array.isArray(logs) ? logs : [],
+    sensor: {
+      owner: last ? normalizeOwnerKey(last) : null,
+      device_model: last?.device_model || null,
+      sensors: sid
+        ? [{ sensor_id: sid, device_model: last?.device_model || null }]
+        : [],
+      data: sid ? { [sid]: Array.isArray(logs) ? logs : [] } : {},
+    },
+  };
 }
 
-async function fetchSensorV2PayloadFrom(base, sensorId, startTimestamp, endTimestamp, signal = null) {
-  const sid = sensorIdToHex(sensorId) || String(sensorId || "").trim();
+async function fetchSensorHistoryPayloadFrom(
+  base,
+  sensorId,
+  startTimestamp,
+  endTimestamp,
+  signal = null
+) {
+  const sid = canonicalSensorId(sensorId) || String(sensorId || "").trim();
   if (!sid) return null;
 
   const origin = rosemanApiBase(base);
@@ -98,11 +121,16 @@ async function fetchSensorV2PayloadFrom(base, sensorId, startTimestamp, endTimes
     return sensorV2Inflight.get(key);
   }
 
-  const promise = fetchJson(
-    `${origin}api/v2/sensor/${sid}/${startTimestamp}/${endTimestamp}`,
-    { cache: "no-store", signal }
+  const promise = fetchRosemanV3SensorPoints(
+    sensorId,
+    startTimestamp,
+    endTimestamp,
+    signal,
+    base
   )
-    .then((payload) => {
+    .then((points) => {
+      if (points === null) return null;
+      const payload = historyPayloadFromProtoLogs(sensorId, protoPointsToHistory(points));
       sensorV2Recent.set(key, { payload, ts: Date.now() });
       return payload;
     })
@@ -114,8 +142,8 @@ async function fetchSensorV2PayloadFrom(base, sensorId, startTimestamp, endTimes
   return promise;
 }
 
-async function fetchSensorV2Payload(sensorId, startTimestamp, endTimestamp, signal = null) {
-  return fetchSensorV2PayloadFrom(
+async function fetchSensorHistoryPayload(sensorId, startTimestamp, endTimestamp, signal = null) {
+  return fetchSensorHistoryPayloadFrom(
     settings.REMOTE_PROVIDER,
     sensorId,
     startTimestamp,
@@ -124,122 +152,17 @@ async function fetchSensorV2Payload(sensorId, startTimestamp, endTimestamp, sign
   );
 }
 
+/** Deprecated v2 JSON — only for sensor→owner until RoSeMAN exposes that in v3. */
+async function fetchLegacyV2SensorJson(base, sensorId, startTimestamp, endTimestamp) {
+  const sid = sensorIdToHex(sensorId) || String(sensorId || "").trim();
+  if (!sid) return null;
+  const origin = rosemanApiBase(base);
+  return fetchJson(`${origin}api/v2/sensor/${sid}/${startTimestamp}/${endTimestamp}`, {
+    cache: "no-store",
+  });
+}
+
 export { canonicalSensorId, sensorIdToHex, sensorIdToSs58 } from "@/utils/sensorId";
-
-function unixToMs(ts) {
-  const n = Number(ts);
-  if (!Number.isFinite(n) || n <= 0) return NaN;
-  return n < 1e12 ? Math.trunc(n * 1000) : Math.trunc(n);
-}
-
-/** v3 ranges are `[start, end)` in milliseconds; v2 sensor ranges are inclusive seconds. */
-function unixToExclusiveEndMs(ts) {
-  const n = Number(ts);
-  if (!Number.isFinite(n) || n <= 0) return NaN;
-  return n < 1e12 ? Math.trunc(n + 1) * 1000 : Math.trunc(n) + 1;
-}
-
-function protoPointsToHistory(points) {
-  if (!Array.isArray(points) || points.length === 0) return [];
-  return points
-    .map((point) => {
-      const ts = Number(point?.timestamp);
-      if (!Number.isFinite(ts) || !point?.data || typeof point.data !== "object") return null;
-      const entry = { timestamp: ts, data: point.data, proto: true };
-      if (point.device_model) entry.device_model = point.device_model;
-      if (point.owner) entry.owner = point.owner;
-      if (
-        point.geo &&
-        Number.isFinite(Number(point.geo.lat)) &&
-        Number.isFinite(Number(point.geo.lng))
-      ) {
-        entry.geo = point.geo;
-      }
-      if (Array.isArray(point.protoPrivate) && point.protoPrivate.length > 0) {
-        entry.protoPrivate = point.protoPrivate;
-      }
-      return entry;
-    })
-    .filter(Boolean)
-    .sort((a, b) => a.timestamp - b.timestamp);
-}
-
-let rosemanV3MessagesSupported = true;
-const ROSEMAN_V3_LATEST_MAX_MS = 24 * 60 * 60 * 1000;
-
-function rosemanV3Url(path, params) {
-  const base = String(settings.REMOTE_PROVIDER || "").replace(/\/?$/, "/");
-  return `${base}${path}?${params}`;
-}
-
-/**
- * Binary `SignedEnvelopeBatch` from RoSeMAN. Only verified envelopes become points.
- * @returns {{ points: object[], cursor: string }|null} null if aborted
- */
-async function fetchRosemanV3ProtobufPoints(path, params, signal = null) {
-  if (!rosemanV3MessagesSupported) return { points: [], cursor: "" };
-  try {
-    if (signal?.aborted) return null;
-    const res = await fetch(rosemanV3Url(path, params), {
-      credentials: "omit",
-      cache: "no-store",
-      signal,
-    });
-    if (res.status === 404) {
-      rosemanV3MessagesSupported = false;
-      return { points: [], cursor: "" };
-    }
-    if (!res.ok) return { points: [], cursor: "" };
-    const buf = new Uint8Array(await res.arrayBuffer());
-    return {
-      points:
-        buf.byteLength > 0
-          ? decodeSignedEnvelopeBatchToPoints(buf, { requireGeo: false, verbose: false })
-          : [],
-      cursor: res.headers.get("X-Next-Cursor") || "",
-    };
-  } catch (error) {
-    if (error?.name === "AbortError" || signal?.aborted) return null;
-    return { points: [], cursor: "" };
-  }
-}
-
-/**
- * Day/week/month chart history from RoSeMAN protobuf (`SignedEnvelopeBatch`).
- * Empty / 404 / decode-miss falls through to v2 JSON in getSensorData.
- */
-async function fetchSensorV3ProtobufLogs(
-  sensorId,
-  startTimestamp,
-  endTimestamp,
-  signal = null
-) {
-  const hex = sensorIdToHex(sensorId);
-  if (!hex) return [];
-  const startMs = unixToMs(startTimestamp);
-  const endMs = unixToExclusiveEndMs(endTimestamp);
-  if (!Number.isFinite(startMs) || !Number.isFinite(endMs) || startMs >= endMs) return [];
-
-  const points = [];
-  let cursor = "";
-
-  for (let page = 0; page < 32; page++) {
-    const params = new URLSearchParams({
-      start: String(startMs),
-      end: String(endMs),
-      limit: "1000",
-      sensor_id: hex,
-    });
-    if (cursor) params.set("cursor", cursor);
-    const pageResult = await fetchRosemanV3ProtobufPoints("api/v3/messages", params, signal);
-    if (pageResult === null) return null;
-    points.push(...pageResult.points);
-    cursor = pageResult.cursor;
-    if (!cursor) break;
-  }
-
-  return protoPointsToHistory(points);
-}
 
 // Cache latest v2 meta for a sensor to drive UI (owner sensors dropdown, etc.)
 const latestSensorMetaById = new Map();
@@ -466,7 +389,7 @@ function maxDataInflightKey(unit, isoDate, end) {
 }
 
 function mapMarkersDataId(unit, isoDate) {
-  return `${String(unit || "").toLowerCase()}:${isoDate}`;
+  return `v3:${String(unit || "").toLowerCase()}:${isoDate}`;
 }
 
 export function getCachedMaxDataValue(sensorId, unit) {
@@ -478,7 +401,14 @@ export function getCachedMaxDataValue(sensorId, unit) {
 
 export function getCachedMaxDataEntry(sensorId, unit) {
   const cache = maxDataApiCache.get(unit);
-  const entry = cache?.values?.[String(sensorId || "")];
+  const values = cache?.values;
+  if (!values) return null;
+  const sid = String(sensorId || "");
+  const entry =
+    values[sid] ||
+    values[canonicalSensorId(sid)] ||
+    values[sensorIdToHex(sid)] ||
+    null;
   return entry && typeof entry === "object" ? entry : null;
 }
 
@@ -626,6 +556,7 @@ function applyMaxValuesToSensors(sensors, unit, maxValues) {
     const entry =
       maxValues?.[sid] ||
       maxValues?.[canonicalSensorId(sid)] ||
+      maxValues?.[sensorIdToHex(sid)] ||
       null;
     const apiNum =
       entry && entry.value != null && Number.isFinite(Number(entry.value))
@@ -936,11 +867,11 @@ export async function getMaxData(start, end, unit, sensors, isoDate = dayISO()) 
 }
 
 function markersListCacheId(isoDate, timelineMode = "day") {
-  return `markers:${timelineMode || "day"}:${isoDate}`;
+  return `markers:v3:${timelineMode || "day"}:${isoDate}`;
 }
 
 /**
- * `api/v2/sensor/markers/{start}/{end}` with IDB cache in mapMarkersData.
+ * `api/v3/messages/latest` with IDB cache in mapMarkersData.
  * Past days: reuse when cached start/end covers the request.
  * Today: also reuse within REMOTE_DAY_REFRESH_MS while `end` drifts with now().
  */
@@ -1060,126 +991,7 @@ export async function getSensors(start, end, provider = "remote", cacheContext =
     ? await loadMarkersListRaw(start, end, cacheContext.isoDate, cacheContext.timelineMode)
     : await REMOTE_PROVIDER.getSensorsForPeriod(start, end);
 
-  const rows = markerRowsFromSensorData(historyData);
-  rows.sensors = await attachRosemanV3Proto(rows.sensors, start, end);
-  rows.sensorsNoLocation = await attachRosemanV3Proto(rows.sensorsNoLocation, start, end);
-  return rows;
-}
-
-function numericMeasurementBag(data) {
-  const out = {};
-  if (!data || typeof data !== "object") return out;
-  for (const [key, raw] of Object.entries(data)) {
-    const unit = String(key).toLowerCase();
-    if (!unit) continue;
-    if (typeof raw === "string" && raw.startsWith("e.")) continue;
-    const n = typeof raw === "number" ? raw : Number(raw);
-    if (Number.isFinite(n)) out[unit] = n;
-  }
-  return out;
-}
-
-function indexProtoLatestPoints(points) {
-  const byKey = new Map();
-  const remember = (key, point) => {
-    const id = String(key || "").trim();
-    if (!id) return;
-    const prev = byKey.get(id);
-    if (!prev || Number(point.timestamp || 0) >= Number(prev.timestamp || 0)) {
-      byKey.set(id, point);
-    }
-  };
-  for (const point of points) {
-    const sid = String(point?.sensor_id || "").trim();
-    if (!sid) continue;
-    remember(sid, point);
-    remember(canonicalSensorId(sid), point);
-    remember(sensorIdToHex(sid), point);
-    remember(sensorIdToSs58(sid), point);
-  }
-  return byKey;
-}
-
-function lookupProtoPoint(byKey, sensorId) {
-  const raw = String(sensorId || "").trim();
-  if (!raw) return null;
-  return (
-    byKey.get(raw) ||
-    byKey.get(canonicalSensorId(raw)) ||
-    byKey.get(sensorIdToHex(raw)) ||
-    byKey.get(sensorIdToSs58(raw)) ||
-    null
-  );
-}
-
-function mergeNumericMax(into, bag) {
-  for (const [unit, n] of Object.entries(bag || {})) {
-    const prev = into[unit];
-    if (typeof prev !== "number" || !Number.isFinite(prev) || n > prev) {
-      into[unit] = n;
-    }
-  }
-}
-
-async function attachRosemanV3Proto(sensors, start, end) {
-  if (!Array.isArray(sensors) || sensors.length === 0) return sensors;
-  const startMs = unixToMs(start);
-  const endMs = unixToExclusiveEndMs(end);
-  if (!Number.isFinite(startMs) || !Number.isFinite(endMs) || startMs >= endMs) {
-    return sensors;
-  }
-
-  const points = [];
-  try {
-    for (let chunkStart = startMs; chunkStart < endMs; chunkStart += ROSEMAN_V3_LATEST_MAX_MS) {
-      const chunkEnd = Math.min(chunkStart + ROSEMAN_V3_LATEST_MAX_MS, endMs);
-      if (chunkEnd <= chunkStart) break;
-      const params = new URLSearchParams({
-        start: String(chunkStart),
-        end: String(chunkEnd),
-      });
-      const page = await fetchRosemanV3ProtobufPoints("api/v3/messages/latest", params);
-      if (!page) break;
-      points.push(...page.points);
-      if (!rosemanV3MessagesSupported) break;
-    }
-  } catch {
-    return sensors;
-  }
-
-  if (points.length === 0) return sensors;
-
-  const byKey = indexProtoLatestPoints(points);
-
-  return sensors.map((sensor) => {
-    const own = lookupProtoPoint(byKey, sensor?.sensor_id);
-    const siblingPoints = own ? [own] : [];
-    for (const entry of Array.isArray(sensor?.sensors) ? sensor.sensors : []) {
-      const sid = parseBundleSensorEntry(entry)?.sensor_id;
-      const point = lookupProtoPoint(byKey, sid);
-      if (point && !siblingPoints.includes(point)) siblingPoints.push(point);
-    }
-    if (siblingPoints.length === 0) return sensor;
-
-    const nums = {};
-    for (const point of siblingPoints) {
-      mergeNumericMax(nums, numericMeasurementBag(point.data));
-    }
-    const maxdata = { ...(sensor.maxdata || {}) };
-    mergeNumericMax(maxdata, nums);
-    const latest = siblingPoints.reduce((a, b) =>
-      Number(b?.timestamp || 0) >= Number(a?.timestamp || 0) ? b : a
-    );
-
-    return {
-      ...sensor,
-      proto: true,
-      device_model: sensor.device_model || own?.device_model || null,
-      data: { ...(sensor.data || {}), ...nums },
-      maxdata,
-      timestamp: latest.timestamp || sensor.timestamp,
-    };
-  });
+  return markerRowsFromSensorData(historyData);
 }
 
 /**
@@ -1205,9 +1017,8 @@ function filterSensorsByConfig(sensors) {
 }
 
 // =============================================================================
-// TEMPORARY Roseman owner workaround — remove when a dedicated Roseman owner API
-// ships. The new markers endpoint (`api/v2/sensor/markers/…`) omits `owner` for
-// historical days before ~2026-06-08.
+// TEMPORARY Roseman owner workaround — v3 latest/messages have no sensor→owner.
+// Keep deprecated v2 JSON for popup decrypt / picker until CPS exposes that.
 //
 // On-demand only (popup / getSensorOwner / preloadSensorMeta) — never per-marker
 // on map load. Fallback chain:
@@ -1237,7 +1048,7 @@ function cacheRosemanOwnerWorkaroundMeta(sensorId, sensorMeta, owner) {
 }
 
 async function ownerFromV2Payload(base, sensorId, startTimestamp, endTimestamp) {
-  const payload = await fetchSensorV2PayloadFrom(base, sensorId, startTimestamp, endTimestamp);
+  const payload = await fetchLegacyV2SensorJson(base, sensorId, startTimestamp, endTimestamp);
   const owner = normalizeOwnerKey(payload?.sensor);
   if (owner) cacheRosemanOwnerWorkaroundMeta(sensorId, payload.sensor, owner);
   return owner || null;
@@ -1539,13 +1350,13 @@ export function getOwnerSensorsWithData(
 }
 
 /**
- * Preloads v2 `{ sensor: { sensors, data, owner } }` meta and caches it,
+ * Preloads `{ sensor: { sensors, data, owner } }` meta from v3 messages and caches it,
  * so UI (owner dropdown) can render before full logs are loaded.
  */
 export async function preloadSensorMeta(sensorId, startTimestamp, endTimestamp, signal = null) {
   if (!sensorId) return null;
   try {
-    const payload = await fetchSensorV2Payload(sensorId, startTimestamp, endTimestamp, signal);
+    const payload = await fetchSensorHistoryPayload(sensorId, startTimestamp, endTimestamp, signal);
     if (payload?.sensor && typeof payload.sensor === "object") {
       let meta = payload.sensor;
       if (!normalizeOwnerKey(meta)) {
@@ -1618,22 +1429,29 @@ export async function getSensorData(
         return Array.isArray(historyData) ? historyData : null;
       }
     } else {
-      const [protoLogs, payload] = await Promise.all([
-        fetchSensorV3ProtobufLogs(sensorId, startTimestamp, endTimestamp, signal),
-        fetchSensorV2Payload(sensorId, startTimestamp, endTimestamp, signal).catch((error) => {
-          if (error?.name === "AbortError" || signal?.aborted) throw error;
-          return null;
-        }),
-      ]);
+      const payload = await fetchSensorHistoryPayload(
+        sensorId,
+        startTimestamp,
+        endTimestamp,
+        signal
+      );
       if (signal?.aborted) return null;
-      if (payload?.sensor && typeof payload.sensor === "object") {
-        cacheSensorMetaForBundle(sensorId, payload.sensor);
-      } else if (payload != null) {
-        // v2 responded without owner meta — avoid duplicate owner workaround fetch this session.
-        rosemanOwnerWorkaroundCache.set(String(sensorId), { owner: null, ts: Date.now() });
+      if (payload === null) return null;
+      let meta = payload?.sensor && typeof payload.sensor === "object" ? payload.sensor : null;
+      if (meta) {
+        if (!normalizeOwnerKey(meta)) {
+          const ownerFromWorkaround = await resolveRosemanOwnerWorkaround(
+            sensorId,
+            startTimestamp,
+            endTimestamp
+          );
+          if (ownerFromWorkaround) meta = { ...meta, owner: ownerFromWorkaround };
+        }
+        cacheSensorMetaForBundle(sensorId, meta);
       }
+      const protoLogs = Array.isArray(payload?.result) ? payload.result : null;
       const owner =
-        normalizeOwnerKey(payload?.sensor) ||
+        normalizeOwnerKey(meta) ||
         (Array.isArray(protoLogs) ? normalizeOwnerKey(protoLogs[0]) : "") ||
         normalizeOwnerKey(getCachedSensorMeta(sensorId));
       if (Array.isArray(protoLogs) && protoLogs.length > 0) {
@@ -1641,13 +1459,7 @@ export async function getSensorData(
           ? await decryptSensorHistoryEntries(sensorId, protoLogs, owner)
           : protoLogs;
       }
-      let historyData = payload?.result;
-      if (Array.isArray(historyData) && owner) {
-        historyData = await decryptSensorHistoryEntries(sensorId, historyData, owner);
-      }
-      // null protoLogs = aborted v3; otherwise fall back to v2 (or null if v2 also missing)
-      if (protoLogs === null && !Array.isArray(historyData)) return null;
-      return Array.isArray(historyData) ? historyData : null;
+      return Array.isArray(protoLogs) ? protoLogs : [];
     }
   } catch (error) {
     // Если запрос был отменен, не логируем ошибку
@@ -1744,7 +1556,7 @@ export async function fetchSensorCities() {
   if (sensorCitiesCache) return sensorCitiesCache;
   if (sensorCitiesPromise) return sensorCitiesPromise;
 
-  sensorCitiesPromise = fetch(`${settings.REMOTE_PROVIDER}api/sensor/cities`, { cache: "default" })
+  sensorCitiesPromise = fetch(`${settings.REMOTE_PROVIDER}api/v3/cities`, { cache: "default" })
     .then(async (res) => {
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const json = await res.json();
@@ -1764,7 +1576,7 @@ export async function fetchSensorCities() {
 
 const SENSOR_IDB_TTL = 24 * 60 * 60 * 1000; // 24 hours
 /** Bump when log shape changes (proto history) so stale IDB day caches are ignored. */
-const SENSOR_LOG_CACHE_GEN = 5;
+const SENSOR_LOG_CACHE_GEN = 6;
 
 function stripSensorCacheAddress(entry) {
   if (!entry || !("address" in entry)) return entry;

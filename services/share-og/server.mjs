@@ -262,8 +262,26 @@ function todayIso() {
 async function fetchSensorDay(sensorId, isoDate) {
   const day = isoDate || todayIso();
   const { start, end } = dayBoundsUnix(day);
-  const url = `${REMOTE_PROVIDER}api/v2/sensor/${encodeURIComponent(sensorId)}/${start}/${end}`;
-  const res = await fetch(url);
+  const id = encodeURIComponent(sensorId);
+  const startMs = start * 1000;
+  const endMs = (end + 1) * 1000;
+  const v3Url = `${REMOTE_PROVIDER}api/v3/messages/?sensor_id=${id}&start=${startMs}&end=${endMs}`;
+  try {
+    const v3Res = await fetch(v3Url);
+    const v3Type = String(v3Res.headers.get("content-type") || "");
+    if (v3Res.ok && v3Type.includes("json")) {
+      const payload = await v3Res.json();
+      return {
+        log: Array.isArray(payload?.result) ? payload.result : [],
+        sensor: payload?.sensor ?? null,
+      };
+    }
+  } catch {
+    // Fall through to deprecated v2 JSON (OG service has no protobuf decoder).
+  }
+
+  const v2Url = `${REMOTE_PROVIDER}api/v2/sensor/${id}/${start}/${end}`;
+  const res = await fetch(v2Url);
   if (!res.ok) return { log: [], sensor: null };
   const payload = await res.json();
   return {

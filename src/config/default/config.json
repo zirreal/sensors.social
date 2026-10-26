@@ -1,9 +1,12 @@
 {
   "LIBP2P": {
     "bootstrappers": [
-      "/dns4/1.pubsub.sensors.social/tcp/443/wss/ipfs/12D3KooWPMrMcxL8eQUyF4nEz6W44TLT1yp6gQPEeDbgbtH9jEeQ",
-      "/dns4/2.pubsub.sensors.social/tcp/443/wss/ipfs/QmPTFt7GJ2MfDuVYwJJTULr6EnsQtGVp8ahYn9NSyoxmd9",
-      "/dns4/3.pubsub.sensors.social/tcp/443/wss/ipfs/QmWZSKTEQQ985mnNzMqhGCrwQ1aTA6sxVsorsycQz9cQrw"
+      "/dns4/1.pubsub.robonomics.network/tcp/443/wss/p2p/12D3KooWBtG1GoLoUrR1SBXhG1VWq1wQWkssLEpmHMs331gicKak",
+      "/dns4/2.pubsub.robonomics.network/tcp/443/wss/p2p/12D3KooWDmEbGiMS5HxLNSjjmkSUHHrbW8SQLzqopMq6HxZy11Jp",
+      "/dns4/3.pubsub.robonomics.network/tcp/443/wss/p2p/12D3KooWMDYKL1Gz85SY2gRNuzYZ7Pgg8yYxRWn8MKzVH97nXah1",
+      "/dns4/1.pubsub.sensors.social/tcp/443/wss/p2p/12D3KooWPMrMcxL8eQUyF4nEz6W44TLT1yp6gQPEeDbgbtH9jEeQ",
+      "/dns4/2.pubsub.sensors.social/tcp/443/wss/p2p/QmPTFt7GJ2MfDuVYwJJTULr6EnsQtGVp8ahYn9NSyoxmd9",
+      "/dns4/3.pubsub.sensors.social/tcp/443/wss/p2p/QmWZSKTEQQ985mnNzMqhGCrwQ1aTA6sxVsorsycQz9cQrw"
     ]
   },
   "REMOTE_PROVIDER": "https://roseman.staging.sensors.social/",

@@ -1,5 +1,13 @@
 import { settings } from "@config";
 import { fetchJson } from "@/utils/utils";
+import {
+  fetchRosemanV3LatestPoints,
+  fetchRosemanV3MaxPoints,
+  fetchRosemanV3SensorPoints,
+  markerRecordsFromLatestPoints,
+  protoPointsToHistory,
+  protoPointsToMaxValues,
+} from "@/utils/map/sensors/rosemanV3";
 
 class Provider {
   constructor(url) {
@@ -10,7 +18,7 @@ class Provider {
 
   async status() {
     try {
-      const res = await fetch(`${settings.REMOTE_PROVIDER}api/sensor/cities`, {
+      const res = await fetch(`${settings.REMOTE_PROVIDER}api/v3/cities`, {
         method: "HEAD",
         cache: "no-store",
       });
@@ -47,11 +55,8 @@ class Provider {
 
   async maxValuesForPeriod(start, end, type) {
     try {
-      const result = await fetchJson(
-        `${settings.REMOTE_PROVIDER}api/v2/sensor/maxdata/${type}/${start}/${end}`,
-        { cache: "no-store" }
-      );
-      return result?.result || {};
+      const points = (await fetchRosemanV3MaxPoints(type, start, end)) || [];
+      return protoPointsToMaxValues(points, type);
     } catch {
       return {};
     }
@@ -71,10 +76,10 @@ class Provider {
 
   async getHistoryBySensor(sensor) {
     try {
-      const result = await fetchJson(`${settings.REMOTE_PROVIDER}api/sensor/${sensor}`, {
-        cache: "no-store",
-      });
-      return result?.result || [];
+      const end = this.end || Math.floor(Date.now() / 1000);
+      const start = this.start || end - 24 * 60 * 60;
+      const points = (await fetchRosemanV3SensorPoints(sensor, start, end)) || [];
+      return protoPointsToHistory(points);
     } catch {
       return [];
     }
@@ -82,11 +87,8 @@ class Provider {
 
   async getHistoryPeriodBySensor(sensor, start, end) {
     try {
-      const result = await fetchJson(
-        `${settings.REMOTE_PROVIDER}api/v2/sensor/${sensor}/${start}/${end}`,
-        { cache: "no-store" }
-      );
-      return result?.result || [];
+      const points = (await fetchRosemanV3SensorPoints(sensor, start, end)) || [];
+      return protoPointsToHistory(points);
     } catch {
       return [];
     }
@@ -94,11 +96,8 @@ class Provider {
 
   async getSensorsForPeriod(start, end) {
     try {
-      const result = await fetchJson(
-        `${settings.REMOTE_PROVIDER}api/v2/sensor/markers/${start}/${end}`,
-        { cache: "no-store" }
-      );
-      return result?.result || [];
+      const points = (await fetchRosemanV3LatestPoints(start, end)) || [];
+      return markerRecordsFromLatestPoints(points);
     } catch {
       return [];
     }

@@ -71,7 +71,10 @@ export default {
       return dayBoundsUnix(this.end).end;
     },
     link() {
-      return `${settings.REMOTE_PROVIDER}api/sensor/csv/${this.startTimestamp}/${this.endTimestamp}/${this.city}`;
+      const startMs = Number(this.startTimestamp) * 1000;
+      const endMs = (Number(this.endTimestamp) + 1) * 1000;
+      const city = encodeURIComponent(this.city || "");
+      return `${settings.REMOTE_PROVIDER}api/v3/messages/csv?start=${startMs}&end=${endMs}&city=${city}`;
     },
   },
   watch: {

@@ -301,6 +301,8 @@ const onRealtimePoint = async (point) => {
       normalizeOwnerKey(livePoint) ||
       normalizeOwnerKey(listOwner) ||
       normalizeOwnerKey(prevPopup);
+    const keepProto =
+      livePoint.proto === true || listOwner?.proto === true || prevPopup?.proto === true;
     setSensorData(point.sensor_id, {
       geo: livePoint.geo,
       model: livePoint.model,
@@ -308,8 +310,10 @@ const onRealtimePoint = async (point) => {
       ...(nextOwner ? { owner: nextOwner } : {}),
       device_model: livePoint.device_model || null,
       timestamp: livePoint.timestamp,
-      proto: livePoint.proto === true,
-      protoPrivate: livePoint.protoPrivate ?? null,
+      proto: keepProto,
+      ...(livePoint.protoPrivate !== undefined
+        ? { protoPrivate: livePoint.protoPrivate }
+        : null),
     });
     updateSensorMarker(livePoint);
 
@@ -320,6 +324,7 @@ const onRealtimePoint = async (point) => {
         const ts = Number(item?.timestamp);
         if (!Number.isFinite(ts) || !item?.data) return null;
         const entry = { timestamp: ts, data: item.data };
+        if (item.proto === true) entry.proto = true;
         if (hasValidCoordinates(item?.geo)) entry.geo = item.geo;
         return entry;
       })
@@ -330,19 +335,29 @@ const onRealtimePoint = async (point) => {
         ? {
             timestamp: ts,
             data: streamData,
+            ...(livePoint.proto === true ? { proto: true } : null),
             ...(hasValidCoordinates(livePoint?.geo) ? { geo: livePoint.geo } : null),
           }
         : null;
     let nextLogs = prevLogs;
     if (entry) {
-      const idx = prevLogs.findIndex((item) => item.timestamp === entry.timestamp);
+      const idx = prevLogs.findIndex(
+        (item) => Number(item.timestamp) === Number(entry.timestamp)
+      );
       if (idx >= 0) {
         const mergedData = mergeMeasurementBags(prevLogs[idx].data, entry.data);
         if (measurementBagsEqual(prevLogs[idx].data, mergedData)) {
           nextLogs = prevLogs;
         } else {
           nextLogs = prevLogs.map((item, i) =>
-            i === idx ? { ...item, ...entry, data: mergedData } : item
+            i === idx
+              ? {
+                  ...item,
+                  ...entry,
+                  data: mergedData,
+                  ...(item.proto === true || entry.proto === true ? { proto: true } : null),
+                }
+              : item
           );
         }
       } else {
@@ -367,7 +382,7 @@ const onRealtimePoint = async (point) => {
     const logsRefUnchanged = nextLogs === prevLogs;
     const dataUnchanged = measurementBagsEqual(prevPopup?.data, streamData);
     if (logsRefUnchanged && dataUnchanged) {
-      const protoOn = livePoint.proto === true || prevPopup?.proto === true;
+      const protoOn = keepProto;
       if (protoOn && prevPopup?.proto !== true) {
         sensorPoint.value = { ...prevPopup, proto: true };
       }
@@ -380,13 +395,14 @@ const onRealtimePoint = async (point) => {
       model: livePoint.model || prevPopup?.model,
       owner: nextPopupOwner,
       device_model: livePoint.device_model || prevPopup?.device_model || null,
-      proto: livePoint.proto === true || prevPopup?.proto === true,
+      proto: keepProto,
       protoPrivate:
         livePoint.protoPrivate === null
           ? null
           : livePoint.protoPrivate || prevPopup?.protoPrivate || null,
       data: streamData,
       logs: logsRefUnchanged ? prevPopup.logs : nextLogs,
+      _logsKey: prevPopup._logsKey || `live:${point.sensor_id}`,
       ...(ownerSensorsWithData?.length ? { ownerSensorsWithData } : null),
     };
     return;
