@@ -23,6 +23,17 @@
       />
 
       <ToggleButton
+        v-if="settings.FIRES"
+        :model-value="fires"
+        @update:modelValue="onFiresToggle"
+        icon-class="fa-solid fa-fire"
+        class="fires-toggle"
+        :disabled="!firesAllowed"
+        :label="$t('layer.fires')"
+        :title="firesAllowed ? $t('layer.firesHint') : $t('layer.firesUnavailable')"
+      />
+
+      <ToggleButton
         v-if="hasMessagesData"
         v-model="messages"
         :icon-class="messages ? 'fa-solid fa-comment' : 'fa-regular fa-comment'"
@@ -100,6 +111,17 @@
                 :disabled="!aodAllowed"
                 :label="$t('layer.aod')"
                 :title="aodAllowed ? $t('layer.aodHint') : $t('layer.aodUnavailable')"
+              />
+
+              <ToggleButton
+                v-if="settings.FIRES"
+                :model-value="fires"
+                @update:modelValue="onFiresToggle"
+                icon-class="fa-solid fa-fire"
+                class="fires-toggle"
+                :disabled="!firesAllowed"
+                :label="$t('layer.fires')"
+                :title="firesAllowed ? $t('layer.firesHint') : $t('layer.firesUnavailable')"
               />
 
               <ToggleButton
@@ -182,6 +204,7 @@ import { instanceMap } from "../../utils/map/map";
 import { resolveMapColorScheme } from "../../utils/map/themeScheme";
 import { initWindLayer, switchWindLayer, destroyWindLayer } from "../../utils/map/wind";
 import { switchAodLayer, isAodAvailable } from "../../utils/map/aod";
+import { switchFiresLayer, isFiresAvailable } from "../../utils/map/fires";
 import measurements from "../../measurements";
 import { sortMapLayerUnits } from "../../measurements/tools";
 // import { getTypeProvider } from "../../utils/utils"; // deprecated
@@ -257,6 +280,16 @@ const readAodPref = () => {
 };
 const aod = ref(readAodPref());
 const aodAllowed = computed(() => isAodAvailable(start.value));
+const readFiresPref = () => {
+  try {
+    // По умолчанию выключен: точки пожаров отвлекают от датчиков
+    return localStorage.getItem("fires") === "true";
+  } catch (e) {
+    return false;
+  }
+};
+const fires = ref(readFiresPref());
+const firesAllowed = computed(() => isFiresAvailable(start.value));
 
 // Computed для проверки, есть ли данные сообщений для отображения
 const hasMessagesData = computed(() => {
@@ -361,6 +394,15 @@ const onAodToggle = (enabled) => {
   }
 };
 
+const onFiresToggle = (enabled) => {
+  fires.value = enabled;
+  try {
+    localStorage.setItem("fires", String(enabled));
+  } catch (e) {
+    // Если localStorage недоступен — работаем без сохранения
+  }
+};
+
 // type теперь computed, поэтому watcher не нужен
 
 // type теперь computed, поэтому синхронизация не нужна
@@ -446,7 +488,7 @@ watch(
   { immediate: true }
 );
 
-// Слой AOD (пыль из CAMS): следует за выбранной датой, WMS хранит только последние дни
+// Слой AOD (пыль и дым из CAMS): следует за выбранной датой, WMS хранит только последние дни
 watch(
   [aod, start],
   ([enabled, date]) => {
@@ -458,6 +500,22 @@ watch(
       return;
     }
     switchAodLayer(map, enabled, date);
+  },
+  { immediate: true }
+);
+
+// Слой пожаров (VIIRS из NASA GIBS): следует за выбранной датой, архив с июля 2025
+watch(
+  [fires, start],
+  ([enabled, date]) => {
+    let map = null;
+    try {
+      map = instanceMap();
+    } catch {
+      // Map isn't ready yet; onMounted retries.
+      return;
+    }
+    switchFiresLayer(map, enabled, date);
   },
   { immediate: true }
 );
@@ -516,6 +574,16 @@ onMounted(async () => {
           switchAodLayer(instanceMap(), aod.value, start.value);
         } catch (error) {
           console.error("Failed to initialize AOD layer on mount:", error);
+        }
+      }, 500);
+    }
+
+    if (fires.value && settings.FIRES) {
+      setTimeout(() => {
+        try {
+          switchFiresLayer(instanceMap(), fires.value, start.value);
+        } catch (error) {
+          console.error("Failed to initialize fires layer on mount:", error);
         }
       }, 500);
     }
@@ -708,9 +776,20 @@ defineExpose({
   opacity: 0.7;
 }
 
+.aod-legend-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 4px;
+}
+
+.aod-legend-name {
+  width: 38px;
+}
+
 .aod-legend-scale {
+  flex: 1;
   height: 8px;
-  margin: 4px 0 2px;
   border-radius: 2px;
   background: linear-gradient(to right, #fff5eb, #fdd0a2, #fd8d3c, #d94801, #7f2704);
 }
@@ -718,9 +797,52 @@ defineExpose({
 .aod-legend-labels {
   display: flex;
   justify-content: space-between;
+  margin: 2px 0 0 44px;
 }
 
 .aod-legend-attr {
+  margin-top: 3px;
+  font-size: 9px;
+  opacity: 0.7;
+}
+
+/* Fires legend; with both legends on, Leaflet puts the newer one on top */
+.leaflet-bottom.leaflet-right .fires-legend {
+  margin-bottom: calc(var(--app-inputheight) + var(--app-controlsgap) * 2);
+  margin-right: var(--app-controlsgap);
+  padding: 6px 8px;
+  border-radius: 6px;
+  background: color-mix(in srgb, var(--color-light) 85%, transparent);
+  color: var(--color-dark);
+  font-size: 11px;
+  line-height: 1.3;
+  width: 170px;
+}
+
+.leaflet-bottom.leaflet-right .aod-legend:has(+ .fires-legend),
+.leaflet-bottom.leaflet-right .fires-legend:has(+ .aod-legend) {
+  margin-bottom: 4px;
+}
+
+.fires-legend-title {
+  font-weight: 600;
+}
+
+.fires-legend-dot {
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: radial-gradient(circle, #ffd666 0, #ff8000 45%, rgba(230, 60, 0, 0) 100%);
+  vertical-align: middle;
+}
+
+.fires-legend-time {
+  font-weight: 400;
+  opacity: 0.7;
+}
+
+.fires-legend-attr {
   margin-top: 3px;
   font-size: 9px;
   opacity: 0.7;

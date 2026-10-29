@@ -13,12 +13,32 @@
   "WIND_PROVIDER": "https://wind.sensors.social/latest",
   "AOD_WMS": {
     "url": "https://eccharts.ecmwf.int/wms/?token=public",
-    "layer": "composition_duaod550",
+    "layers": [
+      { "key": "dust", "layer": "composition_duaod550" },
+      {
+        "key": "smoke",
+        "layer": "composition_bbaod550",
+        "ramp": ["#3a404a", "#4f5662", "#7b838f", "#b8bec7", "#eef0f3"]
+      }
+    ],
     "style": "sh_Oranges_aod",
+    "maxNativeZoom": 6,
     "opacity": 0.9,
     "alphaBoost": 2.2,
     "daysBack": 4,
     "attribution": "Contains modified Copernicus Atmosphere Monitoring Service information"
+  },
+  "FIRES": {
+    "tiles": "https://gibs.earthdata.nasa.gov/wmts/epsg4326/best/{layer}/default/{date}/500m/{z}/{y}/{x}.mvt",
+    "layers": [
+      "VIIRS_NOAA20_Thermal_Anomalies_375m_All",
+      "VIIRS_NOAA21_Thermal_Anomalies_375m_All",
+      "VIIRS_SNPP_Thermal_Anomalies_375m_All"
+    ],
+    "overviewLayers": ["VIIRS_NOAA20_Thermal_Anomalies_375m_All"],
+    "overviewMaxZoom": 4,
+    "since": "2025-07-08",
+    "attribution": "NASA FIRMS / GIBS, VIIRS 375 m"
   },
   "MAP": {
     "zoom": "3",
