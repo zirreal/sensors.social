@@ -5,48 +5,25 @@
         <router-link to="/" class="appicon">
           <img :alt="settings.TITLE" src="../../../public/app-icon-512.png" />
         </router-link>
-        <!-- Если есть sensorsNoLocation - показываем details с полным содержимым -->
-        <details
-          v-if="mapSensorsCountDisplay > 0 && mapNoLocationCount > 0"
-          tabindex="0"
-          class="sensors details-popup"
-        >
-          <summary class="sensors-counter">
-            <IconSensor class="sensors-mainicon" />
-            {{ mapSensorsCountDisplay }}
-          </summary>
-          <div class="details-content nogeo">
-            <section>
-              <h4>{{ sensorsNoLocation?.length }} sensors without geolocation</h4>
-              <ul class="sensors-list">
-                <li v-for="sensor in sensorsNoLocation" :key="sensor.sensor_id">
-                  <a :href="getSensorLink(sensor)">
-                    <b>{{ formatSensorId(sensor.sensor_id) }}</b>
-                  </a>
-                </li>
-              </ul>
-            </section>
-          </div>
-        </details>
-
-        <!-- Если sensorsNoLocation пуст - показываем только div.sensors-counter -->
-        <div v-else-if="mapSensorsCountDisplay > 0" class="sensors-counter">
-          <IconSensor class="sensors-mainicon" />
-          {{ mapSensorsCountDisplay }}
-        </div>
+        <ServiceStatus />
       </div>
 
       <div class="flexline header-actions">
         <a
           href="/where-to-buy/"
-          class="button button-outlined narrow-hide button-round-outline-brightgreen"
+          class="button button-outlined shop-button button-round-outline-brightgreen"
         >
           <font-awesome-icon icon="fa-solid fa-bag-shopping" aria-hidden="true" />
-          <span>{{ $t("Shop sensors") }}</span>
+          <span class="shop-full">{{ $t("Shop sensors") }}</span>
+          <span class="shop-short">{{ $t("nav.buy") }}</span>
         </a>
 
-        <button class="popovercontrol button-round-outline" popovertarget="about">
-          <font-awesome-icon icon="fa-solid fa-bars" />
+        <button
+          class="popovercontrol button-round-outline"
+          popovertarget="about"
+          :aria-label="$t('nav.menu')"
+        >
+          <font-awesome-icon :icon="menuOpen ? 'fa-solid fa-xmark' : 'fa-solid fa-bars'" />
         </button>
 
         <button
@@ -64,93 +41,36 @@
       </div>
     </div>
 
-    <div id="about" class="popover popover-top-right" popover>
-        <h3>{{ $t("header.title") }}</h3>
-        <p>
-          {{ $t("header.text1") }}
-          <a
-            href="https://www.fsf.org/campaigns/priority-projects/decentralization-federation"
-            target="_blank"
-            rel="noopener"
-            >{{ $t("header.link1") }}</a
-          >
-          {{ $t("header.text2") }}
-          <a
-            href="https://robonomics.academy/en/learn/sensors-connectivity-course/sensors-connectivity-module/"
-            target="_blank"
-            rel="noopener"
-            >{{ $t("header.link2") }}</a
-          >
-          {{ $t("header.text3") }}
-        </p>
-        <p>
-          {{ $t("Map data") }} ©
-          <a href="https://www.openstreetmap.org/copyright" target="_blank">{{
-            $t("OpenStreetMap contributors")
-          }}</a>
-        </p>
-
-        <section class="navlinks">
-          <router-link class="navtile" to="/altruist-device-info/">
-            <font-awesome-icon class="navfa" icon="fa-solid fa-circle-info" />
-            <span>{{ $t("Altruist device info") }}</span>
-          </router-link>
-          <router-link class="navtile" to="/where-to-buy/">
-            <font-awesome-icon class="navfa" icon="fa-regular fa-credit-card" />
-            <span>{{ $t("Where to buy") }}</span>
-          </router-link>
-          <router-link class="navtile" to="/altruist-use-cases/">
-            <img class="navimg" :src="urbanIcon" alt="" aria-hidden="true" />
-            <span>{{ $t("Altruist use cases") }}</span>
-          </router-link>
-          <router-link class="navtile" to="/altruist-timeline/">
-            <font-awesome-icon class="navfa" icon="fa-solid fa-infinity" />
-            <span>{{ $t("Altruist timeline") }}</span>
-          </router-link>
-          <router-link class="navtile" to="/altruist-compare/">
-            <img class="navimg" :src="altruistIcon" alt="" aria-hidden="true" />
-            <span>{{ $t("Altruist comparison table") }}</span>
-          </router-link>
-          <router-link class="navtile" to="/altruist-setup/">
-            <img class="navimg" :src="diyIcon" alt="" aria-hidden="true" />
-            <span>{{ $t("Altruist setup") }}</span>
-          </router-link>
-          <router-link class="navtile" to="/air-measurements/">
-            <font-awesome-icon class="navfa" icon="fa-solid fa-chart-simple" />
-            <span>{{ $t("links.measurement") }}</span>
-          </router-link>
-          <router-link class="navtile" to="/construction-monitoring/">
-            <font-awesome-icon class="navfa" icon="fa-solid fa-helmet-safety" />
-            <span>{{ $t("Construction monitoring") }}</span>
-          </router-link>
-          <router-link class="navtile" to="/blog/">
-            <font-awesome-icon class="navfa" icon="fa-regular fa-newspaper" />
-            <span>{{ $t("Blog") }}</span>
-          </router-link>
-          <router-link class="navtile" to="/noise-data-real-estate/">
-            <font-awesome-icon class="navfa" icon="fa-solid fa-volume-high" />
-            <span>{{ $t("Noise data for real estate") }}</span>
-          </router-link>
-          <router-link class="navtile" to="/privacy-policy/">
-            <font-awesome-icon class="navfa" icon="fa-regular fa-file-lines" />
-            <span>{{ $t("links.privacy") }}</span>
-          </router-link>
-          <router-link class="navtile" to="/support/">
-            <font-awesome-icon class="navfa" icon="fa-regular fa-comment" />
-            <span>{{ $t("Support") }}</span>
-          </router-link>
-        </section>
-
-        <ReleaseInfo />
-
-        <div class="locale-select-container">
-          <select v-model="locale">
-            <option v-for="lang in locales" :key="lang.code" :value="lang.code">
-              {{ lang.title }}
-            </option>
-          </select>
-        </div>
+    <div
+      id="about"
+      class="popover popover-top-right"
+      popover
+      @toggle="menuOpen = $event.newState === 'open'"
+    >
+      <div class="menu-head">
+        <span class="menu-title">{{ $t("nav.menu") }}</span>
+        <select v-model="locale" class="menu-locale" :aria-label="$t('nav.language')">
+          <option v-for="lang in locales" :key="lang.code" :value="lang.code">
+            {{ lang.title }}
+          </option>
+        </select>
       </div>
+
+      <nav class="menu-links" :aria-label="$t('nav.menu')">
+        <router-link class="menu-link menu-link-buy" to="/where-to-buy/">{{
+          $t("Where to buy")
+        }}</router-link>
+        <router-link class="menu-link" to="/ai/">{{ $t("nav.ai") }}</router-link>
+        <router-link class="menu-link" to="/altruist-device-info/">{{
+          $t("nav.aboutAltruist")
+        }}</router-link>
+        <router-link class="menu-link" to="/altruist-setup/">{{ $t("nav.setup") }}</router-link>
+        <router-link class="menu-link" to="/blog/">{{ $t("Blog") }}</router-link>
+        <router-link class="menu-link" to="/support/">{{ $t("Support") }}</router-link>
+      </nav>
+
+      <LicenceLine class="menu-licence" />
+    </div>
 
     <div id="bookmarks" class="popover-top-right popover" popover>
       <h3>{{ $t("bookmarks.listtitle") }}</h3>
@@ -162,94 +82,29 @@
 </template>
 
 <script setup>
-import { ref, computed, watch, onMounted, reactive } from "vue";
+import { ref, computed, watch, onMounted } from "vue";
 import { languages } from "@/translate";
-import { settings, excluded_sensors } from "@config";
+import { settings } from "@config";
 import { useI18n } from "vue-i18n";
-import { useRoute, useRouter } from "vue-router";
+import { useRoute } from "vue-router";
 
-import { useMap } from "@/composables/useMap";
 import { useBookmarks } from "@/composables/useBookmarks";
-import { useSensors } from "@/composables/useSensors";
 
-import IconSensor from "../icons/Sensor.vue";
-import ReleaseInfo from "../ReleaseInfo.vue";
+import LicenceLine from "../LicenceLine.vue";
 import Login from "./Login.vue";
+import ServiceStatus from "./ServiceStatus.vue";
 import Bookmarks from "@/components/Bookmarks.vue";
 
-import diyIcon from "@/assets/images/sensorTypes/DIY.svg";
-import urbanIcon from "@/assets/images/sensorTypes/Urban.svg";
-import altruistIcon from "@/assets/images/sensorTypes/Altruist.svg";
-
 const { locale: i18nLocale } = useI18n();
-const router = useRouter();
 const route = useRoute();
 
 const locale = ref(localStorage.getItem("locale") || i18nLocale.value || "en");
 const locales = languages || ["en"];
-const mapState = useMap();
 const { idbBookmarks } = useBookmarks();
+const menuOpen = ref(false);
 const localeComputed = computed(() => locale.value || "en");
-const sensorsData = reactive(useSensors());
-
-/**
- * Фильтрует сенсоры согласно конфигурации excluded_sensors
- * @param {Array} sensors - массив сенсоров для фильтрации
- * @returns {Array} отфильтрованный массив сенсоров
- */
-const filterSensors = (sensors) => {
-  if (!excluded_sensors || !excluded_sensors.sensors || excluded_sensors.sensors.length === 0) {
-    return sensors || [];
-  }
-
-  const { mode, sensors: configSensors } = excluded_sensors;
-  const sensorIdsSet = new Set(configSensors);
-
-  if (!Array.isArray(sensors)) return [];
-
-  if (mode === "include-only") {
-    // Whitelist: показываем только сенсоры из списка
-    return sensors.filter((sensor) => sensorIdsSet.has(sensor.sensor_id));
-  } else {
-    // Blacklist (exclude): скрываем сенсоры из списка
-    return sensors.filter((sensor) => !sensorIdsSet.has(sensor.sensor_id));
-  }
-};
-
-const sensorsNoLocation = computed(() => filterSensors(sensorsData.sensorsNoLocation));
-
-/** No-geo sensors in the counter total (each device row). */
-const mapNoLocationCount = computed(() => (sensorsNoLocation.value || []).length);
-
-/** Total sensors with geo from the loaded list (single source: useSensors). */
-const mapSensorsCountDisplay = computed(() => sensorsData.mapSensorsCount ?? 0);
-
 // Количество закладок
 const bookmarksCount = computed(() => idbBookmarks.value?.length || 0);
-
-// Make a link for sensor. E.g. origin/#/provider/pm10/20/lat/lng/sensor_id
-const getSensorLink = (sensor) => {
-  return router.resolve({
-    name: "main",
-    query: {
-      provider: mapState.currentProvider.value,
-      type: mapState.currentUnit.value,
-      zoom: settings.MAP.zoom,
-      lat: sensor.geo.lat,
-      lng: sensor.geo.lng,
-      sensor: sensor.sensor_id,
-    },
-  }).href;
-};
-
-// Функция форматирования sensor_id: первые 6 символов, троеточие, последние 6
-const formatSensorId = (id) => {
-  id = String(id);
-  if (id.length > 12) {
-    return id.substring(0, 6) + "..." + id.substring(id.length - 6);
-  }
-  return id;
-};
 
 watch(
   locale,
@@ -334,104 +189,72 @@ header > .popover {
   max-width: 100%;
 }
 
-#about p {
-  font-size: 1em;
-  line-height: 1.55;
+#about:popover-open {
+  width: min(360px, calc(100vw - var(--gap) * 2));
+  padding: 14px;
+  border-radius: 16px;
 }
 
-#about h3 {
-  font-size: 1.4em;
-  letter-spacing: 0.2px;
-  margin-bottom: calc(var(--gap) * 0.75);
+.menu-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 0 4px 10px;
 }
 
-.locale-select-container select {
-  --app-inputpadding: 1rem;
+.menu-title {
+  color: #555;
+  font-size: 0.8rem;
+  font-weight: 800;
+}
+
+.menu-head .menu-locale {
+  width: auto;
+  min-height: 44px;
   height: auto;
-  line-height: 1.2;
-  padding-top: 0.9rem;
-  padding-bottom: 0.9rem;
 }
 
-.navlinks {
-  font-weight: 900;
-  margin-bottom: calc(var(--gap) * 1.5);
-  display: grid;
-  gap: calc(var(--gap) * 0.55);
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  align-items: stretch;
+.menu-links {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
 }
 
-.navlinks a.navtile {
-  margin-bottom: 0;
+.menu-links a.menu-link {
   display: flex;
   align-items: center;
-  gap: calc(var(--gap) * 0.8);
-  padding: calc(var(--gap) * 0.7) calc(var(--gap) * 0.5);
-  text-decoration: none;
-  color: var(--color-blue);
-  background: linear-gradient(180deg, rgba(0, 0, 0, 0.025), rgba(0, 0, 0, 0.01));
-  border: 1px solid rgba(0, 0, 0, 0.08);
-  border-radius: 8px;
-  font-size: calc(var(--font-size) * 1.1);
-  min-height: 3.1rem;
-  height: 100%;
-  transition: background 0.15s ease, border-color 0.15s ease, transform 0.15s ease,
-    box-shadow 0.15s ease;
-}
-
-.navlinks a.navtile:hover {
-  background: linear-gradient(180deg, rgba(0, 0, 0, 0.045), rgba(0, 0, 0, 0.02));
-  border-color: rgba(0, 0, 0, 0.12);
-  transform: translateY(-1px);
-  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.08);
-}
-
-.navlinks a.navtile span {
-  line-height: 1.15;
-  flex: 1 1 auto;
-}
-
-.navlinks a.navtile .navfa {
-  color: var(--color-dark);
-}
-
-.navimg {
-  width: 1.35em;
-  height: 1.35em;
-  flex: 0 0 auto;
-  display: block;
-}
-
-/* + sensors list */
-
-.sensors-counter {
-  display: flex;
-  align-items: center;
-  gap: 3px;
-  color: var(--color-dark);
-  background-color: var(--color-light);
-  border-radius: 5px;
-  padding: 4px 5px;
-  font-weight: bold;
-  border: var(--app-borderwidth) solid var(--app-bordercolor);
-}
-
-.sensors-mainicon {
-  width: 19px;
-}
-
-.sensors-list a {
-  display: block;
-  padding: 5px;
-}
-
-.sensors-list li {
-  display: block;
-  border-top: 1px dotted var(--app-bordercolor);
+  box-sizing: border-box;
+  min-height: 50px;
   margin: 0;
+  padding: 0 16px;
+  border: 2px solid var(--color-dark);
+  border-radius: 14px;
+  color: var(--color-dark);
+  font-size: 1.06rem;
+  font-weight: 700;
+  text-decoration: none;
+  transition: background-color 0.2s ease-in-out;
 }
-/* - sensors list */
+
+.menu-links a.menu-link:hover,
+.menu-links a.menu-link:focus-visible,
+.menu-links a.menu-link-buy {
+  background-color: var(--color-green-bright);
+}
+
+.menu-links a.menu-link-buy {
+  font-weight: 800;
+}
+
+.menu-licence {
+  margin: 12px 4px 0;
+  color: #444;
+}
+
+.shop-short {
+  display: none;
+}
 
 /* - bookmarks button */
 .bookmarksbutton.active {
@@ -497,17 +320,6 @@ header > .popover {
     max-width: calc(100vw - 32px);
     margin: 0 16px;
   }
-
-  .navlinks {
-    grid-template-columns: 1fr;
-    gap: calc(var(--gap) * 1.4);
-  }
-
-  .navlinks a.navtile {
-    font-size: calc(var(--font-size) * 1.2);
-    padding: calc(var(--gap) * 1.5) calc(var(--gap) * 0.8);
-    min-height: 3.8rem;
-  }
 }
 /* - bookmarks button */
 
@@ -521,19 +333,32 @@ header > .popover {
   }
 }
 
-@media screen and (width > 900px) {
-  .nogeo {
-    display: grid;
-    grid-template-columns: 350px 1fr;
-    max-width: calc(100vw - var(--gap) * 2) !important;
-    /* min-width: min(800px, calc(100vw - (var(--gap) * 2))) !important; */
-    gap: calc(var(--gap) * 2);
+@media screen and (width < 700px) {
+  .shop-button svg,
+  .shop-full {
+    display: none;
+  }
+
+  .shop-short {
+    display: inline;
   }
 }
 
-.locale-select-container {
-  text-align: center;
-  margin-top: var(--gap);
+@media screen and (width < 400px) {
+  .header-actions .shop-button {
+    padding-inline: 0.6rem;
+  }
+}
+
+@media screen and (width < 500px) {
+  #about:popover-open {
+    width: calc(100vw - var(--gap) * 2);
+  }
+
+  .menu-links a.menu-link {
+    min-height: 56px;
+    font-size: 1.125rem;
+  }
 }
 </style>
 

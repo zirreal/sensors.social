@@ -45,6 +45,11 @@
         <section>
           <h3>{{ $t("history.title") }}</h3>
           <HistoryImport />
+          <p class="licence-note">
+            {{ $t("Sensor data") }} ©
+            {{ $t("sensors.social contributors") }},
+            <a href="https://opendatacommons.org/licenses/odbl/1-0/" target="_blank" rel="noopener">ODbL 1.0</a>
+          </p>
         </section>
       </div>
       <button
@@ -850,8 +855,14 @@ defineExpose({
 </style>
 
 <style scoped>
+.licence-note {
+  margin-top: var(--gap, 1rem);
+  font-size: 0.8em;
+  opacity: 0.7;
+}
+
 .mapcontrols {
-  bottom: 0;
+  bottom: var(--map-footer-peek, 0px);
   box-sizing: border-box;
   display: flex;
   justify-content: space-between;
@@ -873,7 +884,7 @@ defineExpose({
 
 .popover-bottom-right,
 .popover-bottom-left {
-  bottom: calc(var(--app-inputheight) + var(--app-controlsgap) * 2);
+  bottom: calc(var(--app-inputheight) + var(--app-controlsgap) * 2 + var(--map-footer-peek, 0px));
   max-width: calc(100vw - var(--app-controlsgap) * 2);
 }
 

@@ -82,6 +82,7 @@ export default defineConfig(() => {
           "/",
           "/privacy-policy",
           "/support",
+          "/ai",
           "/air-measurements",
           "/altruist-timeline",
           "/altruist-use-cases",
