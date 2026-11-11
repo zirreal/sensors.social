@@ -1,8 +1,15 @@
 <template>
   <footer ref="root" class="site-footer" :class="{ 'site-footer-on-map': onMap }">
-    <button v-if="onMap" type="button" class="site-footer-peek" @click="togglePeek">
-      {{ $t("footer.more") }}
-    </button>
+    <div v-if="onMap" class="site-footer-peek">
+      <button
+        type="button"
+        class="site-footer-more"
+        :aria-expanded="footerOpen ? 'true' : 'false'"
+        @click="togglePeek"
+      >
+        {{ $t("footer.more") }} <span aria-hidden="true">{{ footerOpen ? "↑" : "↓" }}</span>
+      </button>
+    </div>
     <div class="site-footer-in">
       <div class="site-footer-columns">
         <div class="site-footer-brand">
@@ -18,12 +25,14 @@
 
         <nav aria-label="Altruist">
           <h2>Altruist</h2>
+          <router-link to="/altruist/insight/">Altruist Insight</router-link>
+          <router-link to="/altruist/urban/">Altruist Urban</router-link>
+          <router-link to="/altruist/dual/">Altruist Dual</router-link>
           <router-link to="/altruist-device-info/">{{ $t("footer.device") }}</router-link>
           <router-link to="/altruist-setup/">{{ $t("nav.setup") }}</router-link>
           <router-link to="/ai/">{{ $t("nav.ai") }}</router-link>
           <router-link to="/altruist-compare/">{{ $t("footer.compare") }}</router-link>
           <router-link to="/altruist-use-cases/">{{ $t("footer.useCases") }}</router-link>
-          <router-link to="/altruist-timeline/">{{ $t("footer.timeline") }}</router-link>
         </nav>
 
         <nav :aria-label="$t('footer.data')">
@@ -35,10 +44,18 @@
 
         <nav :aria-label="$t('footer.project')">
           <h2>{{ $t("footer.project") }}</h2>
+          <router-link to="/altruist-timeline/">{{ $t("footer.timeline") }}</router-link>
           <router-link to="/blog/">{{ $t("Blog") }}</router-link>
           <router-link to="/support/">{{ $t("Support") }}</router-link>
-          <a href="https://github.com/airalab/sensors.social" target="_blank" rel="noopener"
-            >GitHub</a
+          <!-- the open-source parts a visitor can run on their own -->
+          <h3>GitHub</h3>
+          <a
+            v-for="repo in repos"
+            :key="repo.name"
+            :href="`https://github.com/airalab/${repo.name}`"
+            target="_blank"
+            rel="noopener"
+            >{{ $t(repo.label) }}</a
           >
         </nav>
 
@@ -68,14 +85,35 @@
 </template>
 
 <script setup>
-import { ref } from "vue";
+import { ref, onMounted, onBeforeUnmount } from "vue";
 import { settings } from "@config";
 import { version } from "../../../package.json";
 import LicenceLine from "../LicenceLine.vue";
 
-defineProps({ onMap: { type: Boolean, default: false } });
+const props = defineProps({ onMap: { type: Boolean, default: false } });
 
 const root = ref(null);
+// The blog ticker moved to the strip above the map (TopStrip); down here only the way into the footer.
+const footerOpen = ref(false);
+let page = null;
+const onScroll = () => {
+  footerOpen.value = page.scrollTop > 0;
+};
+
+onMounted(() => {
+  if (!props.onMap) return;
+  page = root.value?.closest("#app");
+  page?.addEventListener("scroll", onScroll, { passive: true });
+});
+
+onBeforeUnmount(() => page?.removeEventListener("scroll", onScroll));
+
+const repos = [
+  { name: "sensors.social", label: "footer.repoMap" },
+  { name: "altruist-firmware", label: "footer.repoFirmware" },
+  { name: "sensors-connectivity", label: "footer.repoConnectivity" },
+  { name: "RoSeMAN", label: "footer.repoRoseman" },
+];
 
 // The map takes wheel and touch for itself, so the strip is the way into the footer there.
 const togglePeek = () => {
@@ -112,22 +150,27 @@ const releaseUrl = `https://github.com/${settings.REPO_NAME}/releases/tag/v${ver
 
 .site-footer-peek {
   display: flex;
+  height: var(--map-footer-peek);
+}
+
+.site-footer-more {
+  display: flex;
+  flex: 1 1 auto;
   align-items: center;
   justify-content: center;
-  width: 100%;
-  height: var(--map-footer-peek);
-  padding: 0;
+  gap: 8px;
+  padding: 0 20px;
   border: 0;
   background: transparent;
   color: var(--color-light);
   font: inherit;
-  font-size: 0.9rem;
+  font-size: 1.1rem;
   font-weight: 700;
   cursor: pointer;
 }
 
-.site-footer-peek:hover,
-.site-footer-peek:focus-visible {
+.site-footer-more:hover,
+.site-footer-more:focus-visible {
   color: var(--color-green-bright);
 }
 
@@ -212,6 +255,15 @@ const releaseUrl = `https://github.com/${settings.REPO_NAME}/releases/tag/v${ver
   color: var(--color-green-bright);
   font-size: 0.8rem;
   font-weight: 800;
+}
+
+.site-footer h3 {
+  margin: 8px 0 0;
+  color: #9a9aa3;
+  font-size: 0.75rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
 }
 
 .site-footer-bottom {

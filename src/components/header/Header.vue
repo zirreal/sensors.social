@@ -1,5 +1,6 @@
 <template>
   <header :class="`route-${route.name || route.path.replaceAll('/', '-')}`">
+    <TopStrip v-if="route.name === 'main'" />
     <div class="header-content flexline space-between">
       <div class="flexline align-start">
         <router-link to="/" class="appicon">
@@ -64,6 +65,11 @@
         <router-link class="menu-link" to="/altruist-device-info/">{{
           $t("nav.aboutAltruist")
         }}</router-link>
+        <div class="menu-models" role="group" :aria-label="$t('nav.altruistModels')">
+          <router-link to="/altruist/insight/">Insight</router-link>
+          <router-link to="/altruist/urban/">Urban</router-link>
+          <router-link to="/altruist/dual/">Dual</router-link>
+        </div>
         <router-link class="menu-link" to="/altruist-setup/">{{ $t("nav.setup") }}</router-link>
         <router-link class="menu-link" to="/blog/">{{ $t("Blog") }}</router-link>
         <router-link class="menu-link" to="/support/">{{ $t("Support") }}</router-link>
@@ -93,6 +99,7 @@ import { useBookmarks } from "@/composables/useBookmarks";
 import LicenceLine from "../LicenceLine.vue";
 import Login from "./Login.vue";
 import ServiceStatus from "./ServiceStatus.vue";
+import TopStrip from "../TopStrip.vue";
 import Bookmarks from "@/components/Bookmarks.vue";
 
 const { locale: i18nLocale } = useI18n();
@@ -245,6 +252,30 @@ header > .popover {
 
 .menu-links a.menu-link-buy {
   font-weight: 800;
+}
+
+.menu-models {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 6px;
+}
+
+.menu-models a {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 44px;
+  border-radius: 999px;
+  background-color: var(--color-light-gray-shop);
+  color: var(--color-dark);
+  font-weight: 700;
+  text-decoration: none;
+}
+
+.menu-models a:hover,
+.menu-models a:focus-visible,
+.menu-models a.router-link-active {
+  background-color: var(--color-green-bright);
 }
 
 .menu-licence {

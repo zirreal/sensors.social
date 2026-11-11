@@ -6,6 +6,7 @@ import AltruistTimeline from "./views/AltruistTimeline.vue";
 import AltruistUseCases from "./views/AltruistUseCases.vue";
 import AltruistDeviceInfo from "./views/AltruistDeviceInfo.vue";
 import AltruistSetup from "./views/AltruistSetup.vue";
+import AltruistLanding from "./views/AltruistLanding.vue";
 import WhereToBuy from "./views/WhereToBuy.vue";
 import ConstructionMonitoring from "./views/ConstructionMonitoring.vue";
 import NoiseDataRealEstate from "./views/NoiseDataRealEstate.vue";
@@ -79,6 +80,24 @@ const router = createRouter({
       component: AltruistSetup,
     },
     {
+      path: "/altruist/insight/",
+      name: "altruist-insight",
+      component: AltruistLanding,
+      props: { model: "insight" },
+    },
+    {
+      path: "/altruist/urban/",
+      name: "altruist-urban",
+      component: AltruistLanding,
+      props: { model: "urban" },
+    },
+    {
+      path: "/altruist/dual/",
+      name: "altruist-dual",
+      component: AltruistLanding,
+      props: { model: "dual" },
+    },
+    {
       path: "/where-to-buy/",
       name: "where-to-buy",
       component: WhereToBuy,
@@ -118,7 +137,9 @@ const router = createRouter({
 
 // Support old urls
 (async () => {
-  if (window.location.hash) {
+  // Old hash-mode urls look like #/provider/type/zoom/lat/lng/sensor. Any other
+  // hash is an anchor on the current page and must stay where it is.
+  if (window.location.hash.startsWith("#/")) {
     const routes = router.options.routes.map((item) => item.path.split("/")[1]);
     const [, provider, type, zoom, lat, lng, sensor] = window.location.hash.split("/");
     if (routes.includes(provider)) {

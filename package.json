@@ -67,6 +67,7 @@
     "openai": "^5.11.0",
     "pbf": "^4.0.1",
     "puppeteer": "^24.15.0",
+    "qrcode": "^1.5.4",
     "robonomics-interface": "^0.6.0",
     "robonomics-interface-vue": "^0.3.0",
     "sensors-social-noble-curves": "npm:@noble/curves@^2.4.0",
